@@ -51,7 +51,7 @@ This document fixes the API conventions every Phase 1+ service boundary must fol
 
 - Successful responses return the typed resource/result directly (or a typed wrapper if pagination/metadata is required — see §8).
 - Error responses use a stable, consistent envelope across all endpoints: a stable machine-readable error code, a human-readable message safe to display or log, and no internal stack trace or implementation detail.
-- Error categories map to the Master §18 status model where applicable (e.g. a food-match/import endpoint may return `needs_user_confirmation` as a defined outcome, not as an HTTP error).
+- Error categories map to the Master §18 status model where applicable (e.g. a food-match/import endpoint may return `needs_confirmation` as a defined outcome, not as an HTTP error — matching the canonical `needs_confirmation` naming used by `ImportJob.processing_status` and `AiExtraction.status` in `29_Data_Model.md` §7.3/§9).
 - Distinct, stable error codes exist for at least: validation failure, unauthenticated, unauthorized (Account/Profile mismatch), not found, conflict/idempotency violation, retryable upstream failure, permanent upstream failure.
 
 ---
@@ -59,7 +59,7 @@ This document fixes the API conventions every Phase 1+ service boundary must fol
 ## 7. Idempotency
 
 - Write operations that can be safely retried by the client (imports, wearable sync triggers, and any other operation backed by durable job state per Master §3.6/§12) accept an idempotency key and return the same logical result on retry rather than creating a duplicate resource.
-- Import endpoints specifically key off `ImportJob.idempotency_key` / `canonical_url` / `content_fingerprint` as defined in `29_Data_Model.md` §7 — a repeated request for the same source does not silently create a duplicate `Recipe` or `UrlSource`.
+- Import endpoints specifically key off `ImportJob.idempotency_key`, the parent `UrlSource.canonical_url`, and the attempt's `content_fingerprint`, per the finalized `UrlSource`/`ImportJob` split in `29_Data_Model.md` §7 — a repeated request for the same source resolves to the existing `UrlSource` and either the existing `ImportJob` (same idempotency key) or a new `ImportJob` against it (retry/re-import), never a duplicate `UrlSource` or `Recipe`.
 - Wearable sync endpoints/workers use `WearableConnection.sync_cursor` and `(wearable_connection_id, provider_record_id)` upsert keys (per `29_Data_Model.md` §8) to guarantee idempotent ingestion.
 
 ---

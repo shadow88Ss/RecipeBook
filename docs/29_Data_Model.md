@@ -56,7 +56,12 @@ No transition may move a `consumed` item back to `draft`, `planned`, or `confirm
 ### 3.3 Protection rules
 
 - `confirmed`: recipe, ingredients, serving size, scheduled time, and any user-entered nutrition values on the item are immutable except through explicit user acceptance of a proposed change. The coach/optimizer may attach a *suggestion* record (see `CoachRecommendation`) referencing the item; it may never mutate the item directly.
-- `consumed`: immutable historical truth. The only permitted mutation path is an explicit correction flow that writes a new value while preserving the prior value and actor in an audit trail (`AuditEvent`, or a `MealItemCorrection` history row — implementation detail for Phase 2/3, but the data model must not allow destructive in-place edits to a consumed item's core nutrition fields).
+- `consumed`: immutable historical truth. The original row is never mutated in place. An explicit correction creates a **new** `MealItem` row with `status = consumed`, and:
+  - the new row's `corrects_meal_item_id` (self-referencing FK, nullable) points back to the row it corrects;
+  - the new row's `correction_reason` (required when `corrects_meal_item_id` is set) records why;
+  - the original row gains `superseded_by_meal_item_id` (self-referencing FK, nullable), set at the same time, so the original remains queryable as historical fact while the current-truth view resolves to the latest row in the correction chain;
+  - the correction action is also written to `AuditEvent` (actor, timestamp, before/after reference).
+  A consumed item is never destructively edited; every correction is additive and traceable.
 
 ### 3.4 Optimizer eligibility (data-model consequence)
 
@@ -89,12 +94,13 @@ Used only when historical reproducibility is required.
 Fields:
 
 - `id`
-- `profile_id`
-- `snapshot_payload` — the full resolved-field-by-field output described in 4.1, stored immutably at the time of creation.
-- `resolver_version`
-- `resolved_at`
-- `linked_event_type`: `consumed_meal | daily_summary_finalized | coach_recommendation | other_auditable_decision`
-- `linked_event_id` — reference to the specific `MealItem`, `DailySummary` (Phase 3+ concept), `CoachRecommendation`, or other auditable row that triggered the snapshot.
+- `profile_id` — required; identifies whose resolved target this is.
+- `snapshot_payload` — the full resolved-field-by-field output described in 4.1 (values + per-field `source`/`source_reference`), stored immutably at the time of creation.
+- `resolver_version` — required.
+- `resolved_at` — required; timestamp the resolution was computed.
+- `snapshot_reason` — required; why the snapshot was created, e.g. `meal_consumed | daily_summary_finalized | coach_recommendation_issued | user_requested_export | manual_audit`.
+- `linked_event_type` — nullable enum, `consumed_meal | daily_summary_finalized | coach_recommendation | other_auditable_decision`; null when the snapshot isn't anchored to one specific row (e.g. `user_requested_export`).
+- `linked_event_id` — nullable; reference to the specific `MealItem`, `DailySummary` (Phase 3+ concept), `CoachRecommendation`, or other auditable row, when `linked_event_type` is set. Optional by design: a snapshot is valid without a single linked row.
 - `created_at`
 
 ### 4.3 Immutability rule
@@ -140,7 +146,14 @@ No screen, module, or AI prompt computes an effective target independently. All 
 - `user_accepted_at` — timestamp of explicit user acceptance. A variant with material AI-generated changes and no `user_accepted_at` is not considered an approved personalization (Master §5, §11.3: AI output validated before persistence, explicit user acceptance required).
 - `created_at`, `updated_at`.
 
-### 6.3 Relationship consequence
+### 6.3 `RecipeVersion` import provenance fields
+
+To satisfy §7.4's traceability requirement, `RecipeVersion` carries:
+
+- `origin_url_source_id` (nullable, → `UrlSource`) — null for a manually authored version.
+- `origin_import_job_id` (nullable, → `ImportJob`) — the specific import operation that produced this version, when applicable.
+
+### 6.4 Relationship consequence
 
 `Recipe 1..N RecipeVersion` (unchanged). `Recipe 1..N RecipePersonalizedVariant` and `Profile 1..N RecipePersonalizedVariant` (new). Personalization never writes to `RawContent` or the base `Recipe`/`RecipeVersion` rows.
 
@@ -148,30 +161,59 @@ No screen, module, or AI prompt computes an effective target independently. All 
 
 ## 7. Import Idempotency and Deduplication
 
-### 7.1 New entity: `ImportJob`
+### 7.1 Finalized architecture: `UrlSource` and `ImportJob` are separate entities
+
+**Approved decision — do not merge these entities during implementation.**
+
+- `UrlSource` represents the persistent external source/resource identity. It exists once per distinct external resource, independent of how many times it has been fetched or processed.
+- `ImportJob` represents one individual ingestion/processing operation performed against a `UrlSource` — an attempt, with its own outcome.
+- Relationship: `UrlSource 1 → N ImportJob`.
+
+This split is required so the platform can distinguish, per the same source: first import, retry, manual re-import, a changed external source, processing with a newer extraction/model version, a failed attempt, and a duplicate/idempotent request — none of which are representable if job state and source identity are the same row.
+
+### 7.2 `UrlSource` fields
 
 - `id`
-- `idempotency_key` — client- or system-supplied key identifying a logical import request.
-- `source_provider` — e.g. `instagram | tiktok | youtube | web | manual`.
-- `canonical_url` — normalized/canonicalized form of the source URL (distinct from the raw submitted URL).
-- `content_fingerprint` — hash of the fetched raw content, used to detect the same content republished at a different URL.
-- `processing_status`: `queued | processing | needs_confirmation | succeeded | failed_retryable | failed_permanent`.
+- `canonical_url` — normalized form of the source URL. **Unique.**
+- `original_url` — the URL as first submitted, prior to normalization (may differ from `canonical_url`).
+- `source_provider` — `instagram | tiktok | youtube | web | manual`.
+- `first_seen_at` — when this source was first submitted to the platform.
+- `last_checked_at` — updated whenever any `ImportJob` attempts this source, regardless of outcome.
+- `latest_content_fingerprint` — denormalized convenience copy of the most recent successful fetch's fingerprint; the authoritative per-attempt fingerprint always lives on the corresponding `ImportJob`/`RawContent`, not here.
+- `created_at`.
+
+### 7.3 `ImportJob` fields
+
+- `id`
+- `url_source_id` (→ `UrlSource`, required).
+- `idempotency_key` — client- or system-supplied key identifying a logical import request. **Unique.**
+- `trigger_type` — `initial_import | retry | manual_reimport | scheduled_recheck`.
+- `requested_by_account_id` (nullable — null for a system-scheduled recheck).
+- `requested_by_profile_id` (nullable, same rule).
+- `content_fingerprint` — hash of the content fetched during *this* attempt (distinct from `UrlSource.latest_content_fingerprint`, which only mirrors the latest successful one).
+- `extraction_model_version` (nullable until AI extraction runs for this job).
+- `processing_status` — `queued | processing | needs_confirmation | succeeded | retryable_failed | permanently_failed | cancelled`. This is the canonical name/value set for import processing state across all Phase 1 documents.
 - `retry_count`.
+- `error_code` (nullable).
+- `started_at`, `completed_at` (nullable).
 - `created_at`, `updated_at`.
 
-### 7.2 Linkage
+Index: `(url_source_id, created_at)` to retrieve a source's job history in order.
 
-- `UrlSource` references the originating `ImportJob` (or `ImportJob` supersedes `UrlSource` as the job-tracking entity, with `UrlSource` retained specifically as the durable record of the source URL identity — exact table consolidation is an implementation-time decision, not a Phase 1 blocker, provided both the idempotency-key/job-status concept and the source-identity concept are represented).
-- `RawContent 1..N` still belongs to a `UrlSource`/`ImportJob`; `AiExtraction 1..N` still belongs to `RawContent` (raw/normalized separation preserved per Master §5/§12).
+### 7.4 Linkage and traceability
+
+- `RawContent` belongs to a specific `ImportJob` (`import_job_id`, required) — each processing attempt's raw fetch is its own row, never overwritten by a later attempt. A denormalized `url_source_id` is also carried on `RawContent` for query convenience.
+- `AiExtraction 1..N` still belongs to `RawContent` (raw/normalized separation preserved per Master §5/§12), and additionally carries a denormalized `import_job_id` so extraction provenance doesn't depend on a multi-hop join.
 - `AiExtraction` gains `extraction_method` and `model_version` fields (also required by §9 below).
+- **The normalized result of an import retains explicit traceability back to both the source and the specific import/extraction operation, not only through the raw-content chain.** `RecipeVersion` (§6) carries `origin_url_source_id` and `origin_import_job_id` (both nullable — null for a manually authored version, populated for a version produced by an import), so a Recipe's provenance is queryable directly, without requiring a join through `AiExtraction → RawContent → ImportJob`.
 
-### 7.3 Deduplication logic (data requirements, not implementation)
+### 7.5 Deduplication logic (data requirements, not implementation)
 
 The model must be able to distinguish:
 
-- the same `canonical_url` submitted twice → resolve via `idempotency_key`/`canonical_url` lookup, no duplicate `ImportJob`.
-- the same `content_fingerprint` at a different `canonical_url` → new `UrlSource`, but linkable to the existing normalized `Recipe`/extraction where the platform can establish it's the same content, rather than blindly creating a duplicate `Recipe`.
-- a genuine content update at an already-imported `canonical_url` → new `ImportJob`/`RawContent` version, not a silent overwrite of the previous raw content (raw content itself is never mutated in place — a new row is added and the prior one retained per its retention rule, §11).
+- the same `canonical_url` submitted twice → resolved via `UrlSource.canonical_url` lookup; a new `ImportJob` with `trigger_type = retry` or `manual_reimport` is created against the *existing* `UrlSource`, never a duplicate `UrlSource`. A resubmission carrying the same `idempotency_key` returns the existing `ImportJob`, not a new one.
+- the same `content_fingerprint` appearing under a different `canonical_url` → a new `UrlSource` (distinct external resource), but linkable to the existing normalized `Recipe`/`RecipeVersion` where the platform can establish it's the same content, rather than blindly creating a duplicate `Recipe`.
+- a genuine content update at an already-imported `canonical_url` → a new `ImportJob` (`trigger_type = scheduled_recheck` or `manual_reimport`) with a new `content_fingerprint`, producing new `RawContent`/`AiExtraction` rows and, where warranted, a new `RecipeVersion` — never a silent overwrite of the previous raw content or recipe version.
 
 ---
 
@@ -203,10 +245,10 @@ Required fields wherever an AI-derived value is persisted:
 - `extraction_method` — model/prompt/pipeline identifier.
 - `model_version`.
 - `confidence` (numeric or banded).
-- `status`: `success | partial_success | needs_user_confirmation | retryable_failure | permanent_failure` (Master §18's minimum status set).
+- `status` — `success | partial_success | needs_confirmation | retryable_failure | permanent_failure` (Master §18's minimum status set; `needs_confirmation` naming kept consistent with `ImportJob.processing_status`'s `needs_confirmation` value, §7.3).
 - `created_at`.
 
-A value with `status = needs_user_confirmation` or low `confidence` must not be treated as authoritative by any deterministic calculation until confirmed (Master §16, §18).
+A value with `status = needs_confirmation` or low `confidence` must not be treated as authoritative by any deterministic calculation until confirmed (Master §16, §18).
 
 ---
 
@@ -225,11 +267,13 @@ A value with `status = needs_user_confirmation` or low `confidence` must not be 
 ### 11.1 New entity: `GuardianAuthorization`
 
 - `id`
-- `guardian_account_id` (→ `Account`)
-- `child_profile_id` (→ `Profile`, where `Profile.is_child = true` via `ChildProfileExtension`)
-- `authorization_scope` — e.g. `full_management | specific_feature_grants` (exact grant taxonomy belongs to `19_Family_and_Multi_Profile.md` / `21_Pediatric_Weight_Management.md`; Phase 1 only needs the entity to exist and be authorizable/revocable).
-- `consented_at`
-- `revoked_at` (nullable)
+- `guardian_account_id` (→ `Account`) — the Account being granted access.
+- `child_profile_id` (→ `Profile`, where `Profile.is_child = true` via `ChildProfileExtension`).
+- `authorization_scope` — `full_management | pediatric_weight_management | view_only`. This is the Phase 1 fixed starting enum; `19_Family_and_Multi_Profile.md` / `21_Pediatric_Weight_Management.md` may propose additional scope values in a later phase, but must not repurpose or redefine these three.
+- `granted_by_account_id` (→ `Account`) — the Account that performed the grant (typically the guardian themself in the initial self-serve flow; kept distinct from `guardian_account_id` so a future co-guardian/administrative grant is representable without a schema change).
+- `consented_at` — required.
+- `revoked_at` (nullable) — null means active; set means revoked.
+- `revoked_by_account_id` (nullable, → `Account`) — required when `revoked_at` is set.
 
 ### 11.2 Relationship consequence
 
@@ -274,10 +318,16 @@ This table is not fully populated in this document; producing it is the immediat
 
 ## 14. Existing Entities Modified by This Document
 
-- `MealItem` — `status`, `confirmed_at`, `consumed_at`, `status_changed_by`.
+- `MealItem` — `status`, `confirmed_at`, `consumed_at`, `status_changed_by`, `corrects_meal_item_id`, `superseded_by_meal_item_id`, `correction_reason`.
 - `ClinicianTarget` — `source_type`, `verification_status`, `provided_by_account_id`, `entered_at`.
-- `AiExtraction` — `extraction_method`, `model_version`, `status` (confidence already implied, now explicit).
+- `AiExtraction` — `extraction_method`, `model_version`, `status`, `import_job_id` (denormalized).
 - `WearableConnection`, `Activity`, `Workout`, `Sleep`, `Recovery` — `provider_record_id`, `provenance`, `synced_at`; `WearableConnection` additionally `sync_cursor`, `last_sync_status`, `retry_count`.
 - `FoodAlias` — `locale`.
 - `FoodServing` — `region` (nullable).
-- `UrlSource` — linkage to `ImportJob`.
+- `UrlSource` — `canonical_url`, `original_url`, `source_provider`, `first_seen_at`, `last_checked_at`, `latest_content_fingerprint` (finalized per §7.2; `UrlSource 1 → N ImportJob`).
+- `RawContent` — `import_job_id` (required), `url_source_id` (denormalized).
+- `RecipeVersion` — `origin_url_source_id`, `origin_import_job_id` (both nullable).
+
+## 15. Full Field-Level Data Dictionary
+
+The exhaustive field-level Data Dictionary (type, nullability, default, key relationships, source, validation, editability, PII/health/child classification, retention, deletion, export, provenance, audit, indexes) for every Phase 1 entity is maintained in a companion document: **`29_Data_Model_Data_Dictionary.md`**. That document is normative for field-level detail; this document remains normative for entity shape, relationships, and lifecycle/state-machine rules.

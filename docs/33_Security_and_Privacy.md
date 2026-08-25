@@ -59,10 +59,10 @@ Per the NFR security requirement and `DEVICE_TRUST.md`, actions that materially 
 |---|---|---|---|---|
 | Account/Auth | `Account`, `AuthIdentity`, `DeviceSession` | While account active (Master §14.1) | On verified deletion request: delete or irreversibly anonymize, except where legally required to retain | Included in account export |
 | Adult Profile | `Profile` (adult), `Goal`, `NutritionTarget` | While profile active | Deleted/anonymized with profile deletion, subject to legal requirements | Included in profile export |
-| Child Profile | `Profile` (child), `ChildProfileExtension`, `GuardianAuthorization` | Stricter minimization (Master §14.3); no indefinite retention for analytics/model-improvement purposes | Deleted on guardian-verified deletion request; `GuardianAuthorization` revocation itself is retained briefly as an audit record of the revocation event, not as ongoing access | Guardian-initiated export only |
+| Child Profile | `Profile` (child), `ChildProfileExtension`, `GuardianAuthorization` | Stricter minimization (Master §14.3); no indefinite retention for analytics/model-improvement purposes | Deleted on guardian-verified deletion request; a revoked `GuardianAuthorization` row is not deleted at revocation time — it is retained as an audit record of the grant/revocation event (not as ongoing access) until the child Profile itself is deleted | Guardian-initiated export only |
 | Health/clinical | `WeightMeasurement`, `ClinicianTarget`, `PregnancyProfile`, `PostpartumProfile`, `BreastfeedingProfile`, `CycleRecord` | While profile active; child instances follow the Child Profile row above | Deleted/anonymized with profile deletion | Included in profile/guardian export |
 | Nutrition history | `MealLog`, `MealItem`, `EffectiveTargetSnapshot` | While profile active — powers history/analytics (Master §14.2) | Deleted/anonymized with profile deletion | Included in profile export |
-| Raw imported content | `RawContent`, `UrlSource`, `ImportJob` | Operational/provenance window only — extraction verification, provenance, user-requested saved content, or a bounded dispute/debug window; **not** unlimited archival (Master §14.4) | Purged per the retention window even without a deletion request; also purged on profile/account deletion | Not included in standard export beyond what the user explicitly saved as a Recipe |
+| Raw imported content | `UrlSource` (persistent source identity), `ImportJob` (per-attempt processing record), `RawContent` (per-attempt raw artifact) | Operational/provenance window only — extraction verification, provenance, user-requested saved content, or a bounded dispute/debug window; **not** unlimited archival (Master §14.4) | Purged per the retention window even without a deletion request; also purged on profile/account deletion. `UrlSource` may outlive an individual purged `ImportJob`/`RawContent` if other, more recent `ImportJob` rows against the same source remain in-window. | Not included in standard export beyond what the user explicitly saved as a Recipe |
 | AI extraction | `AiExtraction` | Tied to its parent `RawContent`'s retention window | Purged with `RawContent` | Not separately exported |
 | Recipes (normalized) | `Recipe`, `RecipeVersion`, `RecipePersonalizedVariant` | Persistent library content — retained independent of the raw source's retention window once normalized and saved by the user | User-deletable individually; deleted with account/profile deletion otherwise | Included in profile export |
 | Wearable data | `WearableConnection`, `Activity`, `Workout`, `Sleep`, `Recovery` | While profile active and connection remains authorized | Deleted/anonymized on disconnection or profile deletion, per provider terms | Included in profile export |
@@ -89,3 +89,44 @@ Concrete retention **durations** (e.g. "90 days" for raw content) are not fixed 
 ## 7. AI Training Exclusion
 
 Per Master §14.6: user health, nutrition, child, pregnancy, or family data is not repurposed for model training by this application. No entity in `29_Data_Model.md` is assumed to feed a training pipeline; if that ever changes it requires a separate explicit consent/governance mechanism and is out of scope for Phase 1.
+
+---
+
+## 8. Ownership and RLS Inputs
+
+Per-entity inputs sufficient for RLS policies to be generated deterministically once migrations are written. This section does not write policy SQL — it fixes, for every Phase 1 entity, the five inputs an RLS policy needs: owning Profile, owning/authorized Account relationship, whether guardian access applies, the access mode, and whether historical/audit rows are immutable.
+
+| Entity | Owning Profile | Account relationship | Guardian access | Access mode | Historical/immutable |
+|---|---|---|---|---|---|
+| Account | — (Account-scoped, not Profile-scoped) | self (`account_id = auth.uid()`) | n/a | RW own row only | no |
+| AuthIdentity | — | owning Account only | n/a | RW own | link/unlink audited; not freely mutable |
+| DeviceSession | — | owning Account only | n/a | read list; write = revoke only | revoked rows retained, not deleted |
+| Profile | self | owning Account (direct), or an Account holding an active `GuardianAuthorization` | yes, for child profiles | RW per role (owner full; guardian per `authorization_scope`) | no |
+| ChildProfileExtension | the child Profile | via Profile's owning/guardian Account | yes (guardian only — child never authenticates) | RW by guardian only | no |
+| GuardianAuthorization | the child Profile (`child_profile_id`) | `guardian_account_id` | n/a (this **is** the guardian-access record) | guardian: read own grants; grant/revoke via explicit action only | yes — append-only for consent history; revoke sets `revoked_at`, never deletes the row |
+| Goal | owning Profile | via Profile | yes (guardian RW on behalf of child) | RW by profile owner/guardian | no |
+| NutritionTarget | owning Profile | via Profile | yes | RW by profile owner/guardian | superseded rows retained, not deleted |
+| ClinicianTarget | owning Profile | via Profile | yes (guardian enters on behalf of child) | RW by profile owner/guardian for value entry; `verification_status` write-restricted to an approved verification workflow | superseded rows retained |
+| WeightMeasurement | owning Profile | via Profile | yes | RW by profile owner/guardian | yes — correction creates a new row, original retained |
+| EffectiveTargetSnapshot | owning Profile | via Profile | yes (guardian read on behalf of child) | read-only after creation; never user-writable | yes — fully immutable |
+| MealLog | owning Profile | via Profile | yes | RW by profile owner/guardian | status derived from MealItem, see below |
+| MealItem | owning Profile (via MealLog) | via Profile | yes | RW while `draft`/`planned`; `confirmed` = suggestion-only; `consumed` = correction-only | yes for `consumed` rows — correction creates a new row |
+| Food | — (global reference data) | n/a | n/a | read-only to all authenticated clients; write restricted to trusted data-ingestion service role | curated, not user-mutable |
+| FoodAlias | — (global) | n/a | n/a | read-only; write via trusted service/validated AI | curated |
+| FoodServing | — (global) | n/a | n/a | read-only; write via trusted service | curated |
+| Nutrient | — (global) | n/a | n/a | read-only | curated, rarely changes |
+| FoodNutrient | — (global) | n/a | n/a | read-only | curated |
+| Recipe | shared/canonical once normalized; `created_by_*` is attribution only, not exclusive ownership | originating Account/Profile (attribution) | n/a directly (guardian access to a child's *saved/personalized* copy runs through `RecipePersonalizedVariant`, not the shared Recipe) | read: per `visibility`/Recipe Library rules (owned by `10_Recipe_Library.md`); write: only via the recipe-intelligence/import pipeline or an explicit edit producing a new `RecipeVersion` | RecipeVersion history immutable once created |
+| RecipeVersion | via parent Recipe | originating Account/Profile (attribution) | n/a | read broad (per Recipe visibility); write append-only, never edited in place | yes — immutable once created |
+| RecipeIngredient | via Recipe/RecipeVersion | same as RecipeVersion | n/a | read broad; write only via RecipeVersion creation | yes — immutable per version |
+| RecipeInstruction | via Recipe/RecipeVersion | same | n/a | same | yes |
+| RecipePersonalizedVariant | owning Profile | via Profile | yes (guardian on behalf of child) | RW by profile owner/guardian only — never shared/public | `user_accepted_at` write-once; adjustments editable before acceptance |
+| UrlSource | — (resource identity, not profile-scoped) | attribution flows through `ImportJob.requested_by_account_id`, not stored directly on `UrlSource` | n/a directly | read/write restricted to the service layer; not directly client-writable | append-only in practice (fields updated by system on each attempt, not by client edit) |
+| ImportJob | attributed via `requested_by_profile_id` | `requested_by_account_id` | n/a directly (a guardian acting for a child profile can be the `requested_by_account_id`) | RW restricted to the initiating Account for visibility/retry actions; `processing_status` written by system/worker only | yes — forward-only state machine, not re-editable once terminal |
+| RawContent | via ImportJob → initiating Profile | via ImportJob's initiating Account | same as ImportJob | read restricted to initiating Account + trusted service; never client-writable directly | yes — immutable, new `ImportJob` produces a new row |
+| AiExtraction | via RawContent → initiating Profile | via RawContent's initiating Account | same | read restricted to initiating Account; write only by the AI pipeline service role | yes — immutable once created |
+| WearableConnection | owning Profile | via Profile | yes | RW by profile owner/guardian (connect/disconnect); sync fields written by worker/service role only | connection metadata mutable; historical sync entries immutable |
+| Activity / Workout / Sleep / Recovery | owning Profile (via WearableConnection) | via Profile | yes | read by profile owner/guardian; write by sync worker only (idempotent upsert), plus explicit `user_override` | upserts idempotent by `provider_record_id`, not free-form edits |
+| AuditEvent | may reference a subject Account/Profile | subject Account/Profile (read visibility limited/none to end user by default) | n/a | write-only by system (append); read restricted to security/audit tooling, not general user-facing API by default | yes — fully immutable, append-only |
+
+This table is the deterministic input set for writing RLS policies in Phase 1 implementation. No RLS policy SQL is authored in this specification pass.
