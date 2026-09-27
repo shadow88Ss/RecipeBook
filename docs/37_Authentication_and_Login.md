@@ -16,9 +16,9 @@
 ## 2. Identity Model
 
 - Authentication identifies the **Account** — the authenticated security principal.
-- **Profile** selection identifies whose nutrition context is being accessed, and is supplied separately from authentication (see `30_API.md` §4).
+- `Account.id` **is always identical to the Supabase Auth `auth.users.id`** for that user — set once at provisioning (§11) and never remapped. There is no separate Account/auth-user mapping table and none is needed: `auth.uid()` (Supabase's JWT `sub` claim) *is* `account.id`. Every RLS policy and helper function resolves the calling Account directly this way (`auth.uid() = account.id`, or `= profile.account_id` / `= guardian_account_id` reached from it).
 - An Account may have one or more permitted Profiles.
-- An Account may have one or more `AuthIdentity` records (Apple, Google, email/password) linked to it — see §7 Profile/Identity Linking.
+- An Account may have one or more `AuthIdentity` records (Apple, Google, email/password) linked to it — see §7 Profile/Identity Linking. `AuthIdentity` is a record of *which provider credentials* an Account has linked; it is never consulted to resolve *which Account* is calling — that resolution is always the direct `auth.uid() = account.id` comparison above. An Account's `auth.users.id` cannot change, so it cannot come to have more than one `id` value, and no two Accounts can ever share one `auth.users.id` — the primary key rules that out by construction.
 
 ---
 
@@ -38,6 +38,7 @@ Entry points: "Continue with Apple", "Continue with Google", "Create Account" (e
 - Supabase Auth issues and refreshes the access/refresh token pair. No competing token system is introduced.
 - Application-level `DeviceSession` records (per `29_Data_Model.md` §2) store **device/session metadata only** — used for session listing, revocation, logout-all, device awareness, last-activity, and security-event tracking. `DeviceSession` is never itself a credential or token authority; it references the Supabase session, it does not replace it.
 - Session lifecycle operations (expiration, rotation, revocation, logout, logout-all) are performed through Supabase Auth's session APIs; `DeviceSession` rows are updated/invalidated in step with those operations, not independently of them.
+- **`DeviceSession.revoked_at` is metadata only and is not itself enforced by RLS or any database policy.** No policy on any table checks it (confirmed by direct query/test, Layer 3 verification). Setting `revoked_at` without also invalidating the corresponding session through a real Supabase Auth call (e.g. `auth.admin.signOut(scope)` targeting that session, or the equivalent) does **not** block further use of an already-issued, still-unexpired Supabase access token — that token remains independently valid for its own remaining lifetime, which is inherent to any JWT-based system and not something the application schema controls. The API-layer implementation of logout / logout-all / lost-device revocation (out of scope for this document, deferred to the not-yet-built backend) must always perform the real Supabase Auth session invalidation as the actual revocation step, and update `DeviceSession` to reflect it — never treat marking `DeviceSession` revoked, alone, as having revoked access. This keeps Supabase Auth the single, authoritative session system; `DeviceSession` is not a second one.
 
 ---
 
@@ -60,8 +61,9 @@ Entry points: "Continue with Apple", "Continue with Google", "Create Account" (e
 
 ## 7. Profile/Identity Linking
 
-- One Account may have multiple `AuthIdentity` records (e.g. a user who originally signed up with email later adds Sign in with Google).
+- One Account may have multiple `AuthIdentity` records (e.g. a user who originally signed up with email later adds Sign in with Google) — confirmed by direct test in Layer 3 verification: linking a second provider to an already-provisioned Account inserts a second `auth_identity` row and creates no second `account` or `profile` row.
 - Linking or merging identities requires proof of ownership of the identity being linked (Supabase Auth's identity-linking flow), never a linkage based solely on a matching email address without provider-verified proof.
+- **Known gap — unlink is not yet mirrored automatically:** `public.auth_identity.unlinked_at` is today only ever set by a legitimate client-driven UPDATE (subject to the column-immutability trigger, §11); there is no trigger reacting to Supabase deleting the corresponding `auth.identities` row (Supabase's own documented unlink mechanism). Confirmed by direct test in Layer 3 verification: deleting an `auth.identities` row does not change `public.auth_identity.unlinked_at`. This is a display/audit-accuracy gap only, not an access-control gap — `auth_identity` (and `unlinked_at`) is never read by any RLS policy or authorization function (§2, §11) — but it means `unlinked_at` cannot yet be trusted as a complete record of provider unlink events end-to-end. Closing it (an `AFTER DELETE ON auth.identities` trigger setting `unlinked_at`) is a small, low-risk future addition, deferred rather than made now since it is not required by anything in scope for this document.
 
 ---
 

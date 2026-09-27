@@ -37,7 +37,7 @@ Then a field table with columns:
 | Field | Type | Null | Default | Key | Source | Validation | User-editable | Notes |
 |---|---|---|---|---|---|---|---|---|
 | id | uuid | not null | — | PK, = Supabase `auth.users.id` | synced_external | must reference an existing Supabase Auth user | no | unique |
-| email | text | nullable (Apple private relay/edge cases) | — | — | synced_external | email format | no (edited via Supabase Auth flow) | unique when present; PII |
+| email | text | nullable (Apple private relay/edge cases) | — | — | synced_external | email format | no (edited via Supabase Auth flow) | **not unique** (Layer 3 correction: two distinct Supabase Auth users may share an email — e.g. Supabase's automatic-linking setting left off per `37_Authentication_and_Login.md` §7/§11 — and must remain two distinct Accounts, never auto-merged); PII |
 | display_name | text | nullable | — | — | user_entered | length/profanity per app rules | yes | PII |
 | created_at | timestamp | not null | now() | — | system_computed | — | no | — |
 | deleted_at | timestamp | nullable | null | — | system_computed | — | no | set on verified deletion/anonymization |
