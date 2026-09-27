@@ -5,10 +5,17 @@
 
 import { Router } from 'express';
 import { AppError } from '../../lib/errors';
-import { paginationQuerySchema, type PaginationQuery } from '../../lib/pagination';
 import { validate } from '../../middleware/validate';
 import { foodConversionSchema } from '../conversion/conversion.schemas';
-import { foodDetailQuerySchema, foodIdParamSchema, foodSearchQuerySchema, type FoodDetailQuery, type FoodSearchQuery } from './food.schemas';
+import {
+  foodDetailQuerySchema,
+  foodIdParamSchema,
+  foodSearchQuerySchema,
+  nutrientListQuerySchema,
+  type FoodDetailQuery,
+  type FoodSearchQuery,
+  type NutrientListQuery,
+} from './food.schemas';
 import type { FoodService } from './food.service';
 
 export function createFoodRouter(service: FoodService): Router {
@@ -52,10 +59,10 @@ export function createFoodRouter(service: FoodService): Router {
 export function createNutrientRouter(service: FoodService): Router {
   const router = Router();
 
-  router.get('/', validate({ query: paginationQuerySchema }), async (req, res, next) => {
+  router.get('/', validate({ query: nutrientListQuerySchema }), async (req, res, next) => {
     if (!req.auth) return next(AppError.unauthenticated());
     try {
-      const page = await service.listNutrients(req.auth, req.query as unknown as PaginationQuery);
+      const page = await service.listNutrients(req.auth, req.query as unknown as NutrientListQuery);
       res.status(200).json(page);
     } catch (err) {
       next(err);

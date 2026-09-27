@@ -21,6 +21,7 @@
 
 import { div, fromNumber, isZero, mul, roundHalfUp, toDecimalString, type Rational } from './decimal';
 import { BASE_UNIT, resolveUnit, unitFactor, type BaseUnit, type Dimension, type UnitDefinition } from './units';
+import { authorityOf, isGlobalReferenceAuthority, type AuthorityClass } from '../authority/authority';
 
 export const CONVERSION_VERSION = 'conversion-5a.1';
 export const RESULT_DECIMAL_PLACES = 6;
@@ -69,6 +70,9 @@ export interface ProvenanceEntry {
   kind: 'unit_definition' | 'food_serving' | 'food_density';
   reference: string;
   source: ReferenceSource | 'unit_registry';
+  /** Layer 5C authority class of the value; unit definitions are exact
+   * legal definitions, not data. */
+  authority: AuthorityClass | 'deterministic_definition';
 }
 
 export interface ConvertedResult {
@@ -82,10 +86,11 @@ export interface ConvertedResult {
   /** True when any reference value used is `ai_matched` — an unvalidated
    * match may not silently become authoritative (Master §16). */
   confirmation_required: boolean;
-  /** False whenever confirmation_required is true: a result derived from an
-   * AI-generated serving weight or density is never authoritative, and a
-   * nutrition calculation must not treat it as such (Layer 5A final
-   * alignment, item 8). */
+  /** False whenever any serving weight or density used is not global
+   * reference authority: ai_matched (inference — Layer 5A final alignment,
+   * item 8) or user_entered (personal data, never global reference —
+   * Layer 5C). A nutrition calculation must not treat such a result as
+   * authoritative reference data. */
   authoritative: boolean;
   conversion_version: string;
 }
@@ -121,6 +126,7 @@ interface ResolvedEndpoint {
   serving_id: string | null;
   provenance: ProvenanceEntry;
   confirmation_required: boolean;
+  authoritative: boolean;
 }
 
 function resolveEndpoint(endpoint: ConversionEndpoint, food: FoodConversionData | null): ResolvedEndpoint | UnresolvedResult {
@@ -137,8 +143,9 @@ function resolveEndpoint(endpoint: ConversionEndpoint, food: FoodConversionData 
       factor: fromNumber(serving.canonical_quantity),
       unit: 'serving',
       serving_id: serving.id,
-      provenance: { kind: 'food_serving', reference: serving.id, source: serving.source },
+      provenance: { kind: 'food_serving', reference: serving.id, source: serving.source, authority: authorityOf(serving.source) },
       confirmation_required: serving.source === 'ai_matched',
+      authoritative: isGlobalReferenceAuthority(serving.source),
     };
   }
 
@@ -158,8 +165,9 @@ function resolveEndpoint(endpoint: ConversionEndpoint, food: FoodConversionData 
     factor: unitFactor(unit.code),
     unit: unit.code,
     serving_id: null,
-    provenance: { kind: 'unit_definition', reference: unit.code, source: 'unit_registry' },
+    provenance: { kind: 'unit_definition', reference: unit.code, source: 'unit_registry', authority: 'deterministic_definition' },
     confirmation_required: false,
+    authoritative: true,
   };
 }
 
@@ -228,6 +236,7 @@ export function convertExact(request: ConversionRequest, food: FoodConversionDat
     provenance.push(to.provenance);
   }
   let confirmationRequired = from.confirmation_required || to.confirmation_required;
+  let authoritative = from.authoritative && to.authoritative;
 
   // 1. source -> base
   let value = mul(fromNumber(request.quantity), from.factor);
@@ -266,8 +275,9 @@ export function convertExact(request: ConversionRequest, food: FoodConversionDat
       applied_as: appliedAs,
       reference_id: food.food_id,
     });
-    provenance.push({ kind: 'food_density', reference: food.food_id, source: food.density.source });
+    provenance.push({ kind: 'food_density', reference: food.food_id, source: food.density.source, authority: authorityOf(food.density.source) });
     confirmationRequired ||= food.density.source === 'ai_matched';
+    authoritative &&= isGlobalReferenceAuthority(food.density.source);
   }
 
   // 3. base -> target
@@ -289,6 +299,6 @@ export function convertExact(request: ConversionRequest, food: FoodConversionDat
     steps,
     provenance,
     confirmation_required: confirmationRequired,
-    authoritative: !confirmationRequired,
+    authoritative,
   };
 }

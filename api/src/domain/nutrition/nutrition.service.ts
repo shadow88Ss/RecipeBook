@@ -32,6 +32,8 @@ import {
 } from './nutrition.engine';
 import type { NutritionCalculateRequest } from './nutrition.schemas';
 import type { FoodNutrientRecord } from './sourceResolution';
+import { projectAggregateSummary, projectItemSummary } from './nutritionSummary';
+import { authorityOf } from '../authority/authority';
 
 interface FoodRow {
   id: string;
@@ -70,7 +72,7 @@ export class NutritionService {
         in: { food_id: foodIds },
       }),
       db.select<NutrientDefinition>('nutrient', {
-        columns: 'id, canonical_key, unit',
+        columns: 'id, canonical_key, unit, role',
         order: { column: 'canonical_key', ascending: true },
         limit: IN_MEMORY_PAGE_FETCH_CAP,
       }),
@@ -124,6 +126,8 @@ export class NutritionService {
       precision: { decimal_places: NUTRITION_DECIMAL_PLACES, rounding: ROUNDING_MODE },
       items: result.items.map(toItemDto),
       aggregate: toAggregateDto(result.aggregate, result.items.length),
+      // Layer 5C — projection of `aggregate`, never recalculated.
+      summary: projectAggregateSummary(result.aggregate, result.items.length),
     };
   }
 }
@@ -147,9 +151,11 @@ function toItemDto(item: ItemCalculation) {
     input: item.input,
     normalized_quantity: normalized,
     resolved_nutrient_count: item.nutrients.filter((n) => n.status === 'resolved').length,
+    summary: projectItemSummary(item),
     nutrients: item.nutrients.map((n) => ({
       nutrient_id: n.nutrient.id,
       nutrient_key: n.nutrient.canonical_key,
+      nutrient_role: n.nutrient.role ?? 'other',
       unit: n.unit,
       status: n.status,
       ...(n.value !== null ? roundValue(n.value) : { value: null, is_zero: false, below_output_precision: false }),
@@ -157,13 +163,14 @@ function toItemDto(item: ItemCalculation) {
         ? {
             food_nutrient_id: n.selected.food_nutrient_id,
             source: n.selected.source,
+            authority: authorityOf(n.selected.source),
             amount_per_basis: n.selected.amount_per_basis,
             basis_quantity: n.selected.basis_quantity,
             basis_unit: n.selected.basis_unit,
             quantity_in_basis_unit: roundedNumber(n.selected.quantity_in_basis_unit),
           }
         : null,
-      candidates: n.status === 'ambiguous_nutrient_source' ? n.candidates : [],
+      candidates: n.status === 'ambiguous_nutrient_source' ? n.candidates.map((c) => ({ ...c, authority: authorityOf(c.source) })) : [],
       excluded: n.excluded,
       conversion_reason: n.conversion_reason,
     })),
@@ -179,6 +186,7 @@ function toAggregateDto(aggregate: AggregateNutrient[], itemCount: number) {
     nutrients: aggregate.map((n) => ({
       nutrient_id: n.nutrient.id,
       nutrient_key: n.nutrient.canonical_key,
+      nutrient_role: n.nutrient.role ?? 'other',
       unit: n.nutrient.unit,
       coverage: n.coverage,
       ...(n.value !== null ? roundValue(n.value) : { value: null, is_zero: false, below_output_precision: false }),

@@ -12,16 +12,20 @@ import type { Pool } from 'pg';
 
 const id = (group: number, n: number) => `f5b${group}0000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 
-export const NUT = {
-  energy: id(0, 1),
-  protein: id(0, 2),
-  carbohydrate: id(0, 3),
-  fat: id(0, 4),
-  fiber: id(0, 5),
-  iron: id(0, 6),
-  vitaminD: id(0, 7),
-  sodium: id(0, 8),
-} as const;
+/** Ids of canonical vocabulary rows seeded by
+ * 20260929120000_nutrient_vocabulary_and_authority.sql, looked up by key in
+ * seedNutritionFixtures() (seeded ids differ per database). */
+export const NUT = { energy: '', protein: '', carbohydrate: '', fat: '', fiber: '', iron: '', vitaminD: '', sodium: '' };
+const NUT_KEYS: Record<keyof typeof NUT, string> = {
+  energy: 'energy',
+  protein: 'protein',
+  carbohydrate: 'carbohydrate',
+  fat: 'fat',
+  fiber: 'fiber',
+  iron: 'iron',
+  vitaminD: 'vitamin_d',
+  sodium: 'sodium',
+};
 
 export const F = {
   rice: id(1, 1), // complete, per 100 g, known-zero vitamin D and sodium
@@ -43,17 +47,12 @@ export const SRV = {
 } as const;
 
 export async function seedNutritionFixtures(pool: Pool): Promise<void> {
-  const nutrients: Array<[string, string, string]> = [
-    [NUT.energy, 'energy', 'kcal'],
-    [NUT.protein, 'protein', 'g'],
-    [NUT.carbohydrate, 'carbohydrate', 'g'],
-    [NUT.fat, 'fat', 'g'],
-    [NUT.fiber, 'fiber', 'g'],
-    [NUT.iron, 'iron', 'mg'],
-    [NUT.vitaminD, 'vitamin_d', 'mcg'],
-    [NUT.sodium, 'sodium', 'mg'],
-  ];
-  for (const row of nutrients) await pool.query('insert into nutrient (id, canonical_key, unit) values ($1, $2, $3)', row);
+  for (const [name, key] of Object.entries(NUT_KEYS) as Array<[keyof typeof NUT, string]>) {
+    const { rows } = await pool.query<{ id: string }>('select id from nutrient where canonical_key = $1', [key]);
+    const row = rows[0];
+    if (!row) throw new Error(`Canonical nutrient ${key} is not seeded.`);
+    NUT[name] = row.id;
+  }
 
   const foods: Array<[string, string, string, number | null, string | null]> = [
     [F.rice, 'fixture5b_rice_cooked', 'trusted_database', null, null],

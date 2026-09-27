@@ -33,11 +33,10 @@ export const SERVING = {
   aiScoop: 'f5a10000-0000-4000-8000-000000000006',
 } as const;
 
-export const NUTRIENT = {
-  energy: 'f5a20000-0000-4000-8000-000000000001',
-  protein: 'f5a20000-0000-4000-8000-000000000002',
-  fiber: 'f5a20000-0000-4000-8000-000000000003',
-} as const;
+/** Ids of the canonical vocabulary rows seeded by
+ * 20260929120000_nutrient_vocabulary_and_authority.sql — filled in by
+ * seedFoodFixtures(), since seeded ids differ per database. */
+export const NUTRIENT = { energy: '', protein: '', fiber: '' };
 
 export async function seedFoodFixtures(pool: Pool): Promise<void> {
   const foods: Array<[string, string, string | null, string, number | null, string | null]> = [
@@ -80,7 +79,7 @@ export async function seedFoodFixtures(pool: Pool): Promise<void> {
     [SERVING.flourCupAu, FOOD.flour, '1 cup', 'AU', 250, 'ml', 'trusted_database'],
     [SERVING.flourTbsp, FOOD.flour, '1 tablespoon', null, 7.8, 'g', 'trusted_database'],
     [SERVING.chickpeasCan, FOOD.chickpeas, '1 can, drained', null, 240, 'g', 'trusted_database'],
-    [SERVING.chickenPiece, FOOD.chickenBreast, '1 piece', null, 120, 'g', 'user_entered'],
+    [SERVING.chickenPiece, FOOD.chickenBreast, '1 piece', null, 120, 'g', 'trusted_database'],
     [SERVING.aiScoop, FOOD.chickpeaFlour, '1 scoop', null, 30, 'g', 'ai_matched'],
   ];
   for (const row of servings) {
@@ -90,14 +89,10 @@ export async function seedFoodFixtures(pool: Pool): Promise<void> {
     );
   }
 
-  const nutrients: Array<[string, string, string]> = [
-    [NUTRIENT.energy, 'energy', 'kcal'],
-    [NUTRIENT.protein, 'protein', 'g'],
-    [NUTRIENT.fiber, 'fiber', 'g'],
-  ];
-  for (const row of nutrients) {
-    await pool.query('insert into nutrient (id, canonical_key, unit) values ($1, $2, $3)', row);
-  }
+  const { rows } = await pool.query<{ id: string; canonical_key: keyof typeof NUTRIENT }>(
+    "select id, canonical_key from nutrient where canonical_key in ('energy', 'protein', 'fiber')",
+  );
+  for (const row of rows) NUTRIENT[row.canonical_key] = row.id;
 
   // Two sources for chickpeas/protein deliberately coexist (Data Dictionary
   // §18: multiple sourced values per pair are intentional).

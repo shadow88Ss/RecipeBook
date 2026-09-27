@@ -256,8 +256,78 @@ Competing values are **never summed and never averaged**.
 **Security.** Authentication is required; reads use the caller's token under RLS (SELECT-only on the food tables); no service-role access; only `POST /v1/nutrition/calculate` exists on this route.
 
 **Known limitations / deferred.**
-- No approved nutrient vocabulary: which `canonical_key` is energy (and whether in kcal or kJ), whether carbohydrate is "by difference" or "by summation", etc. The engine is key-agnostic; a mobile "calories/macros" summary needs that vocabulary first.
+- ~~No approved nutrient vocabulary~~ — **resolved by Layer 5C (§16)**. The engine stays key-agnostic.
 - `trusted_database` vs `manufacturer_label` conflicts stay ambiguous until the Product model can tell generic foods from exact products.
 - `user_entered` nutrient values are unusable until a product/user-data workflow permits them.
-- User-entered **serving weights** remain usable (Layer 5A semantics); only `ai_matched` serving weights/densities are non-authoritative.
+- ~~User-entered serving weights remain usable~~ — **superseded by Layer 5C (§16)**: user-entered servings/densities are personal data, rejected from the global tables and non-authoritative if encountered.
 - Reference data is fetched per request (nutrient vocabulary capped at 1000 rows), per the §14 rule-11 development-foundation limits.
+
+---
+
+## 16. Phase 2 Layer 5C — Nutrient Vocabulary & Data Authority (implemented)
+
+Architecture hardening on top of §15. **The nutrition engine is unchanged in its arithmetic and stays nutrient-key agnostic**: it never branches on protein, fiber, iron or any other key. The vocabulary is metadata for projections, analytics and ingestion. Layer 5B's `ambiguous_nutrient_source` behavior is approved as-is (competing usable records for one Food + Nutrient are never averaged, summed or arbitrarily ordered; the future Product/Barcode model supplies the missing context). Migration: `20260929120000_nutrient_vocabulary_and_authority.sql`. Code: `api/src/domain/nutrition/vocabulary.ts`, `nutritionSummary.ts`, `api/src/domain/authority/authority.ts`.
+
+**Canonical nutrient vocabulary.** Stable, language-independent `Nutrient.canonical_key` values (translated labels belong to the `(nutrient_id, locale)` lookup, never new keys). Seeded by the migration as platform metadata (not food data); a test asserts the database rows equal the code registry.
+
+| key | role | unit | canonical meaning (what a source value must mean to map here) |
+|---|---|---|---|
+| `energy` | energy | kcal | Food energy in kcal as stated by the source; never derived |
+| `protein` | macronutrient | g | Total protein |
+| `carbohydrate` | macronutrient | g | **Total carbohydrate, including dietary fiber and sugars** (US "Total Carbohydrate", USDA "by difference") * |
+| `fat` | macronutrient | g | Total fat (total lipid) |
+| `fiber` | fiber | g | Total dietary fiber |
+| `sodium` | micronutrient | mg | Sodium (not salt) |
+| `potassium`, `calcium`, `iron`, `magnesium`, `zinc` | micronutrient | mg | The element as stated |
+| `vitamin_a` | micronutrient | mcg | mcg RAE * |
+| `vitamin_c` | micronutrient | mg | Ascorbic acid |
+| `vitamin_d` | micronutrient | mcg | D2 + D3 by mass; IU not mapped * |
+| `vitamin_e` | micronutrient | mg | Alpha-tocopherol * |
+| `vitamin_k` | micronutrient | mcg | By mass as stated |
+| `thiamin`, `riboflavin`, `vitamin_b6` | micronutrient | mg | As stated |
+| `niacin` | micronutrient | mg | As stated; preformed vs niacin equivalents recorded per source mapping * |
+| `folate` | micronutrient | mcg | mcg DFE; food/total folate not mapped without an approved conversion * |
+| `vitamin_b12` | micronutrient | mcg | As stated |
+
+\* `measure_requires_mapping_review`: several distinct scientific measures share the name, so each source's measure must be confirmed when its ingestion mapping is written, never assumed.
+
+**Roles.** `Nutrient.role` ∈ `energy | macronutrient | fiber | micronutrient | other` — explicit metadata, never inferred from display strings. `GET /v1/nutrients` returns `role` and accepts `?role=` to filter. Every nutrient in `POST /v1/nutrition/calculate` (per item and aggregate) and in `GET /v1/foods/{id}` carries `nutrient_role`.
+
+**Reporting units.** One per nutrient (`Nutrient.unit`), enforced by `nutrient_role_reporting_unit`: energy → `kcal`; macronutrient and fiber → `g`; micronutrient → `mg` or `mcg`. `IU` and `kJ` are not permitted reporting units. There is exactly one energy identity (`uq_nutrient_single_energy`). IU ↔ mass conversions are not implemented; an IU-only source value stays unmapped.
+
+**Energy semantics.** `energy` in kcal is the one canonical energy identity for application summaries. Stored authoritative energy values are the only source; missing energy is never derived from macronutrients (no 4/4/9). kJ may be accepted as source data only once an explicit kJ → kcal policy is approved; until then a kJ-only value is not mapped, and kcal and kJ are never combined (the engine refuses to add incompatible units).
+
+**Carbohydrate semantics.** The platform `carbohydrate` is total carbohydrate including fiber. Datasets that distinguish "by difference", "available" and "total" must be mapped explicitly by ingestion; "available carbohydrate" (fiber excluded) must not be mapped to `carbohydrate` without an approved conversion. No fuzzy name matching. The platform does not compute net carbohydrate.
+
+**Data authority model** (`authority.ts`; every provenance/source entry now carries `authority`):
+
+| class | source | meaning |
+|---|---|---|
+| `global_reference` | `trusted_database` | approved trusted database value; authoritative for everyone |
+| `exact_product` | `manufacturer_label` | authoritative for the exact represented product; competes ⇒ ambiguous until Product identity exists |
+| `personal_user_confirmed` | `user_entered` | user-confirmed personal data; usable only for that user's own resolved food/meal within an approved personal/product workflow; never global reference, never authoritative for other users |
+| `non_authoritative_inference` | `ai_matched` | AI match/estimate; may suggest, never authoritative |
+
+**User-entered servings and density.** `food_serving` and `food` are global tables with no owner column, so a user-entered serving weight or density stored there would be read by — and reused for — every account. The database now rejects both (`food_serving_no_personal_source`, `food_density_no_personal_source`), and the engine treats any user-entered serving/density it encounters as non-authoritative (`authority: personal_user_confirmed`, conversion `authoritative: false`, nutrients `non_authoritative_quantity`). User-confirmed amounts reach the engine today as explicit quantities (e.g. "my bowl = 250 g" is sent as `250 g`). **Future need:** a profile-scoped serving/measurement mechanism (owned by a later Food Logging/personalization layer) to store "my bowl = 250 g" as personal data. It must never be auto-promoted into `food_serving`.
+
+**AI-matched servings/density.** Remain non-authoritative (`non_authoritative_inference`). AI may suggest "about one cup" or "about 120 g"; a later user confirmation turns that into a user-confirmed input quantity for that user's meal — it never becomes global reference data.
+
+**Nutrition summary projection.** `POST /v1/nutrition/calculate` now also returns `summary` (aggregate) and `items[].summary`:
+```
+summary: { energy_kcal, protein_g, carbohydrate_g, fat_g, fiber_g }
+  each: { nutrient_key, value | null, is_zero, below_output_precision,
+          coverage: complete|partial|unavailable,
+          status: null | partial | no_data | <item nutrient status> | not_in_vocabulary | unit_mismatch,
+          resolved_item_count, item_count }
+```
+A **projection** of the Layer 5B result (`nutritionSummary.ts`): it looks up each field's canonical key and copies the already-calculated value and coverage. It performs no arithmetic — no summing, scaling, derivation or unit conversion. Unavailable stays `null`, partial stays `partial` (a lower bound), a known zero stays `0` with `is_zero: true`. A field is bound to its key **and** unit (`energy_kcal` requires `energy` in kcal); otherwise it is `unavailable` with `unit_mismatch`/`not_in_vocabulary` rather than mislabeled. Stable shape for recipe cards, meal logs, the daily tracker, meal plans and progress screens.
+
+**Micronutrients** stay in the generic `nutrients[]` result (same engine), found by stable key (`iron`, `calcium`, `vitamin_d`, …) or `nutrient_role: "micronutrient"`. No separate micronutrient engine.
+
+**Production ingestion contract** (normative for any future dataset; nothing is ingested yet):
+1. Every external nutrient identifier is mapped explicitly to a platform `canonical_key` (e.g. `<source> nutrient 1008 → energy`, `<source> nutrient 1003 → protein`). Display-name matching alone is never a mapping.
+2. Each mapping records the source's measure/definition and unit and must match the canonical meaning above; a mismatch (kJ energy, IU vitamins, available carbohydrate, food folate, retinol) is left unmapped until an approved conversion exists. Mapping-review nutrients (*) need explicit sign-off.
+3. Amounts are stored in the nutrient's reporting unit (converted only within g/mg/mcg); `basis_quantity`/`basis_unit` state the source's basis explicitly.
+4. A nutrient the source does not report gets **no** row (unknown); a reported 0 gets a 0 row (known zero).
+5. Mappings are versioned and provenanced (source dataset + release, mapping version, reviewer), so every FoodNutrient value can be traced to its source identifier.
+6. Ingested rows use `trusted_database` or `manufacturer_label` only; the global tables never receive `user_entered` servings/density.

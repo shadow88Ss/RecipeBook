@@ -6,6 +6,8 @@
 
 import { z } from 'zod';
 import { paginationQuerySchema } from '../../lib/pagination';
+import { NUTRIENT_ROLES } from '../nutrition/vocabulary';
+import { AUTHORITY_CLASSES } from '../authority/authority';
 import { canonicalizeLocale, canonicalizeRegion, DEFAULT_LOCALE, normalizeSearchTerm } from './locale';
 
 const foodDataSourceSchema = z.enum(['trusted_database', 'manufacturer_label', 'user_entered', 'ai_matched']);
@@ -103,18 +105,26 @@ export const nutrientDtoSchema = z.object({
   id: z.uuid(),
   canonical_key: z.string(),
   unit: z.string(),
+  role: z.enum(NUTRIENT_ROLES),
 });
+
+export const nutrientListQuerySchema = paginationQuerySchema.extend({
+  role: z.enum(NUTRIENT_ROLES).optional(),
+});
+export type NutrientListQuery = z.infer<typeof nutrientListQuerySchema>;
 export type NutrientDto = z.infer<typeof nutrientDtoSchema>;
 
 export const foodNutrientDtoSchema = z.object({
   id: z.uuid(),
   nutrient_id: z.uuid(),
   nutrient_key: z.string(),
+  nutrient_role: z.enum(NUTRIENT_ROLES),
   nutrient_unit: z.string(),
   amount: z.number(),
   basis_quantity: z.number(),
   basis_unit: z.enum(['g', 'ml']),
   source: foodDataSourceSchema,
+  authority: z.enum(AUTHORITY_CLASSES),
 });
 export type FoodNutrientDto = z.infer<typeof foodNutrientDtoSchema>;
 

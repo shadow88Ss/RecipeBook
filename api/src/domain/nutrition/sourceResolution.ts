@@ -26,6 +26,7 @@
 // record, or none.
 
 import type { ReferenceSource } from '../conversion/conversion.engine';
+import { authorityOf, type AuthorityClass } from '../authority/authority';
 
 export const AUTHORITATIVE_NUTRIENT_SOURCES: readonly ReferenceSource[] = ['trusted_database', 'manufacturer_label'];
 
@@ -41,6 +42,7 @@ export interface FoodNutrientRecord {
 export interface ExcludedRecord {
   food_nutrient_id: string;
   source: ReferenceSource;
+  authority: AuthorityClass;
   reason: 'ai_matched_not_authoritative' | 'user_entered_not_permitted';
 }
 
@@ -63,6 +65,7 @@ export function resolveNutrientSource(records: readonly FoodNutrientRecord[]): S
       excluded.push({
         food_nutrient_id: record.id,
         source: record.source,
+        authority: authorityOf(record.source),
         reason: record.source === 'ai_matched' ? 'ai_matched_not_authoritative' : 'user_entered_not_permitted',
       });
     }

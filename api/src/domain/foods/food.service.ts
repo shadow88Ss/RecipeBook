@@ -14,11 +14,12 @@
 // trusted ingestion workflow that is not part of Layer 5A.
 
 import { AppError } from '../../lib/errors';
-import { paginateInMemory, IN_MEMORY_PAGE_FETCH_CAP, type Page, type PaginationQuery } from '../../lib/pagination';
+import { paginateInMemory, IN_MEMORY_PAGE_FETCH_CAP, type Page } from '../../lib/pagination';
 import type { ScopedDbClient, ScopedDbFactory } from '../../lib/scopedDb';
 import type { AuthContext } from '../../types/express';
 import { convert, type ConversionResult, type FoodConversionData, type ReferenceSource } from '../conversion/conversion.engine';
 import type { FoodConversionInput } from '../conversion/conversion.schemas';
+import { authorityOf } from '../authority/authority';
 import { localeFallbackChain, localeRank, regionOfLocale } from './locale';
 import type {
   FoodAliasDto,
@@ -29,6 +30,7 @@ import type {
   FoodSearchResult,
   FoodServingDto,
   NutrientDto,
+  NutrientListQuery,
 } from './food.schemas';
 
 interface FoodRow {
@@ -43,7 +45,7 @@ const FOOD_COLUMNS = 'id, canonical_name, category, source, density_g_per_ml, de
 
 const ALIAS_COLUMNS = 'id, locale, alias_text, is_primary, source';
 const SERVING_COLUMNS = 'id, serving_description, region, canonical_quantity, canonical_unit, source';
-const NUTRIENT_COLUMNS = 'id, canonical_key, unit';
+const NUTRIENT_COLUMNS = 'id, canonical_key, unit, role';
 
 interface FoodNutrientRow {
   id: string;
@@ -155,11 +157,13 @@ export class FoodService {
         id: row.id,
         nutrient_id: row.nutrient_id,
         nutrient_key: nutrient.canonical_key,
+        nutrient_role: nutrient.role,
         nutrient_unit: nutrient.unit,
         amount: row.amount_per_canonical_unit,
         basis_quantity: row.basis_quantity,
         basis_unit: row.basis_unit,
         source: row.source,
+        authority: authorityOf(row.source),
       });
     }
     nutrientDtos.sort((a, b) => compareText(a.nutrient_key, b.nutrient_key) || compareText(a.source, b.source));
@@ -189,14 +193,15 @@ export class FoodService {
     return convert({ quantity: input.quantity, from: toEndpoint(input.from), to: toEndpoint(input.to) }, data);
   }
 
-  async listNutrients(auth: AuthContext, pagination: PaginationQuery): Promise<Page<NutrientDto>> {
+  async listNutrients(auth: AuthContext, query: NutrientListQuery): Promise<Page<NutrientDto>> {
     const db = this.dbFactory.forUser(auth);
     const rows = await db.select<NutrientDto>('nutrient', {
       columns: NUTRIENT_COLUMNS,
+      ...(query.role ? { eq: { role: query.role } } : {}),
       order: { column: 'canonical_key', ascending: true },
       limit: IN_MEMORY_PAGE_FETCH_CAP,
     });
-    return paginateInMemory(rows, pagination);
+    return paginateInMemory(rows, query);
   }
 
   private async requireFood(db: ScopedDbClient, foodId: string): Promise<FoodRow> {

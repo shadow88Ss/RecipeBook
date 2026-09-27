@@ -337,7 +337,7 @@ describe('POST /v1/foods/{food_id}/convert', () => {
       confirmation_required: false,
       conversion_version: 'conversion-5a.1',
     });
-    expect(res.body.provenance).toContainEqual({ kind: 'food_density', reference: FOOD.flour, source: 'trusted_database' });
+    expect(res.body.provenance).toContainEqual({ kind: 'food_density', reference: FOOD.flour, source: 'trusted_database', authority: 'global_reference' });
   });
 
   it('converts servings both ways, including a region-specific serving by explicit id', async () => {
@@ -349,7 +349,7 @@ describe('POST /v1/foods/{food_id}/convert', () => {
 
     const piece = await convertFood(FOOD.chickenBreast, { quantity: 1.5, from: { serving_id: SERVING.chickenPiece }, to: { unit: 'oz' } });
     expect(piece.body).toMatchObject({ status: 'converted', quantity: 6.349313 });
-    expect(piece.body.provenance[0]).toEqual({ kind: 'food_serving', reference: SERVING.chickenPiece, source: 'user_entered' });
+    expect(piece.body.provenance[0]).toEqual({ kind: 'food_serving', reference: SERVING.chickenPiece, source: 'trusted_database', authority: 'global_reference' });
   });
 
   it('returns unresolved outcomes (200) instead of guessing', async () => {
@@ -396,12 +396,20 @@ describe('POST /v1/foods/{food_id}/convert', () => {
 describe('GET /v1/nutrients, GET /v1/units, POST /v1/units/convert', () => {
   it('lists the nutrient vocabulary, paginated', async () => {
     const first = await request(app).get('/v1/nutrients').query({ limit: 2 }).set('Authorization', auth());
-    expect(first.body.data).toEqual([
-      { id: NUTRIENT.energy, canonical_key: 'energy', unit: 'kcal' },
-      { id: NUTRIENT.fiber, canonical_key: 'fiber', unit: 'g' },
-    ]);
-    const second = await request(app).get('/v1/nutrients').query({ limit: 2, cursor: first.body.pagination.nextCursor }).set('Authorization', auth());
-    expect(second.body.data.map((n: { canonical_key: string }) => n.canonical_key)).toEqual(['protein']);
+    expect(first.body.data.map((n: { canonical_key: string }) => n.canonical_key)).toEqual(['calcium', 'carbohydrate']);
+    const keys: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const page: request.Response = await request(app)
+        .get('/v1/nutrients')
+        .query(cursor ? { limit: 5, cursor } : { limit: 5 })
+        .set('Authorization', auth());
+      keys.push(...page.body.data.map((n: { canonical_key: string }) => n.canonical_key));
+      cursor = page.body.pagination.nextCursor;
+    } while (cursor);
+    expect(keys).toHaveLength(22);
+    expect(keys).toContain('vitamin_b12');
+    expect(new Set(keys).size).toBe(keys.length);
   });
 
   it('lists the unit registry with exact factors', async () => {

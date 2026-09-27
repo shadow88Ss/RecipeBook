@@ -14,6 +14,9 @@ import { rebuildTestDatabase } from '../helpers/testDb';
 import { seedScenario, SEED } from '../helpers/seed';
 import { F, NUT, SRV, seedNutritionFixtures } from '../helpers/nutritionFixtures';
 import { signTestToken, TEST_JWT_SECRET } from '../helpers/jwt';
+import { CANONICAL_NUTRIENTS } from '../../src/domain/nutrition/vocabulary';
+
+const VOCABULARY_SIZE = CANONICAL_NUTRIENTS.length;
 
 let pool: Pool;
 let app: ReturnType<typeof createApp>;
@@ -186,7 +189,8 @@ describe('K-O, T, U: aggregation and completeness', () => {
     // fiber: rice + bread, not milk
     expect(agg('fiber')).toMatchObject({ coverage: 'partial', value: 2.22 });
     // complete: energy, protein, fat; partial: carbohydrate, fiber, iron, vitamin_d, sodium
-    expect(body.aggregate.coverage_summary).toEqual({ complete: 3, partial: 5, unavailable: 0 });
+    // every other vocabulary nutrient is known for none of the three foods
+    expect(body.aggregate.coverage_summary).toEqual({ complete: 3, partial: 5, unavailable: VOCABULARY_SIZE - 8 });
   });
 
   it('M: vitamin D known for none of the foods is unavailable, not 0', async () => {
@@ -247,7 +251,7 @@ describe('P-S: source resolution, AI authority and provenance', () => {
     for (const n of body.items[0]?.nutrients ?? []) expect(n.value).toBeNull();
     expect(itemNutrient(0, 'energy')).toMatchObject({ status: 'not_authoritative', excluded: [{ source: 'ai_matched', reason: 'ai_matched_not_authoritative' }] });
     expect(itemNutrient(0, 'protein')).toMatchObject({ status: 'not_authoritative', excluded: [{ source: 'user_entered', reason: 'user_entered_not_permitted' }] });
-    expect(body.aggregate.coverage_summary).toEqual({ complete: 0, partial: 0, unavailable: 8 });
+    expect(body.aggregate.coverage_summary).toEqual({ complete: 0, partial: 0, unavailable: VOCABULARY_SIZE });
     expect(agg('energy').value).toBeNull();
   });
 
@@ -257,6 +261,7 @@ describe('P-S: source resolution, AI authority and provenance', () => {
     expect(itemNutrient(0, 'protein').source).toEqual({
       food_nutrient_id: rows[0].id,
       source: 'trusted_database',
+      authority: 'global_reference',
       amount_per_basis: 2.7,
       basis_quantity: 100,
       basis_unit: 'g',

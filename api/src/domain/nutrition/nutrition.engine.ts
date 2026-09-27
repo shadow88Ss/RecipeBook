@@ -38,6 +38,7 @@ import {
 import { BASE_UNIT, resolveUnit } from '../conversion/units';
 import { convertNutrientAmount } from './nutrientUnits';
 import { resolveNutrientSource, type ExcludedRecord, type FoodNutrientRecord } from './sourceResolution';
+import type { NutrientRole } from './vocabulary';
 
 export const NUTRITION_CALCULATION_VERSION = 'nutrition-calculation-5b.1';
 export const NUTRITION_DECIMAL_PLACES = 6;
@@ -46,6 +47,8 @@ export interface NutrientDefinition {
   id: string;
   canonical_key: string;
   unit: string;
+  /** Layer 5C metadata; the engine never branches on it. */
+  role?: NutrientRole;
 }
 
 export interface FoodNutritionData extends FoodConversionData {

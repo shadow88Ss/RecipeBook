@@ -60,8 +60,8 @@ describe('unit -> unit (same dimension, no food needed)', () => {
       { operation: 'base_to_unit', from_unit: 'ml', to_unit: 'tsp_metric', factor: '5', applied_as: 'divide' },
     ]);
     expect(result.provenance).toEqual([
-      { kind: 'unit_definition', reference: 'tbsp_us', source: 'unit_registry' },
-      { kind: 'unit_definition', reference: 'tsp_metric', source: 'unit_registry' },
+      { kind: 'unit_definition', reference: 'tbsp_us', source: 'unit_registry', authority: 'deterministic_definition' },
+      { kind: 'unit_definition', reference: 'tsp_metric', source: 'unit_registry', authority: 'deterministic_definition' },
     ]);
     expect(result.precision).toEqual({ decimal_places: 6, rounding: 'half_up' });
     expect(result.conversion_version).toBe(CONVERSION_VERSION);
@@ -122,7 +122,7 @@ describe('serving conversions', () => {
   it('serving -> grams uses the canonical quantity', () => {
     const result = ok(convert({ quantity: 2, from: { serving_id: SLICE }, to: { unit: 'g' } }, food));
     expect(result.quantity).toBe(56);
-    expect(result.provenance[0]).toEqual({ kind: 'food_serving', reference: SLICE, source: 'trusted_database' });
+    expect(result.provenance[0]).toEqual({ kind: 'food_serving', reference: SLICE, source: 'trusted_database', authority: 'global_reference' });
   });
 
   it('grams -> servings divides by the canonical quantity', () => {
@@ -140,7 +140,7 @@ describe('serving conversions', () => {
     const result = ok(convert({ quantity: 1, from: { serving_id: CUP_SERVING }, to: { unit: 'g' } }, food));
     expect(result.quantity).toBe(142.32); // 240 ml x 0.593 g/ml
     expect(result.steps.map((s) => s.operation)).toEqual(['serving_to_base', 'density', 'base_to_unit']);
-    expect(result.provenance).toContainEqual({ kind: 'food_density', reference: food.food_id, source: 'trusted_database' });
+    expect(result.provenance).toContainEqual({ kind: 'food_density', reference: food.food_id, source: 'trusted_database', authority: 'global_reference' });
   });
 
   it('mass -> volume divides by density', () => {

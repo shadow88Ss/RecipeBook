@@ -327,6 +327,7 @@ This table is not fully populated in this document; producing it is the immediat
 - `FoodServing` — `region` (nullable).
 - `Food` — `density_g_per_ml`, `density_source` (both nullable, paired; Phase 2 Layer 5A).
 - `FoodNutrient` — `basis_quantity`, `basis_unit` (Phase 2 Layer 5A).
+- `Nutrient` — `role` (Phase 2 Layer 5C); canonical vocabulary seeded. `FoodServing.source` and `Food.density_source` may no longer be `user_entered` (Layer 5C — personal data never enters global reference tables).
 - `UrlSource` — `canonical_url`, `original_url`, `source_provider`, `first_seen_at`, `last_checked_at`, `latest_content_fingerprint` (finalized per §7.2; `UrlSource 1 → N ImportJob`).
 - `RawContent` — `import_job_id` (required), `url_source_id` (denormalized).
 - `RecipeVersion` — `origin_url_source_id`, `origin_import_job_id` (both nullable).

@@ -307,7 +307,7 @@ Indexes: `(profile_id, meal_log_id)`, `(status)`.
 | category | text | nullable | — | — | trusted_database | — | no | — |
 | source | enum(`trusted_database`,`manufacturer_label`,`user_entered`,`ai_matched`) | not null | — | — | system_computed | fixed set (Master §16) | no | — |
 | density_g_per_ml | numeric | nullable | null | — | trusted_database / manufacturer_label / ai_matched | positive; set together with `density_source` | no | Layer 5A. Only path for mass ↔ volume conversion; null = the food cannot be converted across dimensions (1 ml = 1 g is never assumed). An `ai_matched` density is never authoritative (`30_API.md` §14, rules 2, 8) |
-| density_source | enum(`trusted_database`,`manufacturer_label`,`user_entered`,`ai_matched`) | nullable | null | — | system_computed | non-null iff `density_g_per_ml` is non-null (`food_density_source_pairing`) | no | Layer 5A. Provenance of the density value itself, independent of `source` |
+| density_source | enum(`trusted_database`,`manufacturer_label`,`user_entered`,`ai_matched`) | nullable | null | — | system_computed | non-null iff `density_g_per_ml` is non-null (`food_density_source_pairing`); never `user_entered` (`food_density_no_personal_source`, Layer 5C) | no | Layer 5A. Provenance of the density value itself, independent of `source` |
 | created_at / updated_at | timestamp | not null | now() | — | system_computed | — | no | — |
 
 ---
@@ -346,7 +346,7 @@ Unique: `(food_id, locale, alias_text)`. Index: `(locale, alias_text)` for searc
 | region | text | nullable | null | — | trusted_database | BCP 47 region/market subtag | no | null = region-agnostic |
 | canonical_quantity | numeric | not null | — | — | trusted_database | positive | no | — |
 | canonical_unit | text | not null | — | — | trusted_database | `g` or `ml` only (`food_serving_canonical_unit_base`, Layer 5A) | no | the two canonical base units of the conversion engine |
-| source | enum(`trusted_database`,`user_entered`,`ai_matched`) | not null | — | — | system_computed | — | no | — |
+| source | enum(`trusted_database`,`user_entered`,`ai_matched`) | not null | — | — | system_computed | `user_entered` rejected (`food_serving_no_personal_source`, Layer 5C) | no | a user-entered serving is personal data and has no place in this global table |
 | created_at | timestamp | not null | now() | — | system_computed | — | no | — |
 
 Unique: `(food_id, serving_description, region)`.
@@ -355,7 +355,7 @@ Unique: `(food_id, serving_description, region)`.
 
 ## 17. Nutrient
 
-**Purpose:** canonical, language-neutral nutrient identity (Master §13.4). Localized display labels live in a separate `(nutrient_id, locale)` lookup, deferred to `06_Nutrition_Database.md` — not separately dictionaried here.
+**Purpose:** canonical, language-neutral nutrient identity (Master §13.4). Localized display labels live in a separate `(nutrient_id, locale)` lookup, deferred to `06_Nutrition_Database.md` — not separately dictionaried here. The canonical vocabulary (22 keys, roles, reporting units, meanings) is fixed in `30_API.md` §16 (Layer 5C).
 **PII:** no. **Health:** no. **Child-sensitive:** no.
 **Retention:** indefinite reference data. **Deletion:** not user-deletable. **Export:** n/a. **Audit:** curation changes logged.
 
@@ -363,7 +363,8 @@ Unique: `(food_id, serving_description, region)`.
 |---|---|---|---|---|---|---|---|---|
 | id | uuid | not null | — | PK | system_computed | — | no | — |
 | canonical_key | text | not null | — | — | trusted_database | e.g. `protein`, `fiber`, `vitamin_c` | no | unique |
-| unit | text | not null | — | — | trusted_database | canonical unit (g/mg/mcg; energy in kcal) | no | the canonical **reporting** unit; every FoodNutrient amount for this nutrient is expressed in it. Layer 5B converts only within g/mg/mcg and never kcal ↔ kJ (`30_API.md` §15) |
+| role | enum(`energy`,`macronutrient`,`fiber`,`micronutrient`,`other`) | not null | `other` | — | trusted_database | role ↔ unit rule `nutrient_role_reporting_unit`; one `energy` row only | no | Layer 5C; explicit metadata, never inferred from labels |
+| unit | text | not null | — | — | trusted_database | energy→kcal; macronutrient/fiber→g; micronutrient→mg/mcg (Layer 5C) | no | the canonical **reporting** unit; every FoodNutrient amount for this nutrient is expressed in it. Layer 5B converts only within g/mg/mcg and never kcal ↔ kJ (`30_API.md` §15) |
 | created_at | timestamp | not null | now() | — | system_computed | — | no | — |
 
 ---
