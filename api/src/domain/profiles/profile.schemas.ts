@@ -39,3 +39,23 @@ export const pediatricProfileDtoSchema = z.object({
 export type PediatricProfileDto = z.infer<typeof pediatricProfileDtoSchema>;
 
 export type AnyProfileDto = ProfileDto | PediatricProfileDto;
+
+const isoDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'date_of_birth must be an ISO date (YYYY-MM-DD).')
+  .refine((value) => !Number.isNaN(Date.parse(value)), 'date_of_birth must be a valid calendar date.')
+  .refine((value) => Date.parse(value) <= Date.now(), 'date_of_birth must not be in the future.');
+
+/** Layer 4B §2 — only the two fields Profile's own Data Dictionary marks
+ * user-editable (id/account_id/is_child/created_at/deleted_at are
+ * structurally absent from this schema, and are additionally frozen at the
+ * database layer by 20260825130000_profile_immutable_columns.sql). */
+export const profilePatchSchema = z
+  .object({
+    display_name: z.string().trim().min(1).max(200).optional(),
+    date_of_birth: isoDateSchema.nullable().optional(),
+  })
+  .refine((body) => body.display_name !== undefined || body.date_of_birth !== undefined, {
+    message: 'At least one of display_name or date_of_birth must be provided.',
+  });
+export type ProfilePatch = z.infer<typeof profilePatchSchema>;

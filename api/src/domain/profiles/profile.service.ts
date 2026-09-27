@@ -2,15 +2,26 @@
 // route handlers (Layer 4A spec §1) so it is directly unit-testable and so
 // the route layer stays a thin adapter.
 
+import { requireProfileScope } from '../../lib/authorize';
 import { AppError } from '../../lib/errors';
 import { buildPage, decodeCursor, encodeCursor, type Page, type PaginationQuery } from '../../lib/pagination';
+import type { ScopedDbFactory } from '../../lib/scopedDb';
 import type { AuthContext } from '../../types/express';
 import { toProfileDto } from './profile.dto';
-import type { ProfileRepository } from './profile.repository';
-import type { AnyProfileDto } from './profile.schemas';
+import type { ProfileRepository, ProfileRow } from './profile.repository';
+import type { AnyProfileDto, ProfilePatch } from './profile.schemas';
+
+const PROFILE_COLUMNS = 'id, account_id, display_name, is_child, date_of_birth, created_at';
 
 export class ProfileService {
-  constructor(private readonly repository: ProfileRepository) {}
+  /** dbFactory is optional so existing Layer 4A call sites/tests that only
+   * exercise the two GET endpoints are unaffected — it is required only by
+   * updateProfile (Layer 4B), which throws clearly if it was omitted rather
+   * than silently no-op'ing. */
+  constructor(
+    private readonly repository: ProfileRepository,
+    private readonly dbFactory?: ScopedDbFactory,
+  ) {}
 
   /** The accessible-profile set is small by construction (one Account's own
    * profiles plus guarded children — not an unbounded, growing collection),
@@ -54,5 +65,32 @@ export class ProfileService {
       throw AppError.notFound('Profile not found.');
     }
     return toProfileDto(row);
+  }
+
+  /** Layer 4B §2 — full_management only (profile_update_managed RLS policy,
+   * 20260825121100_rls_account_auth_profile.sql), covering both an adult
+   * editing their own profile and a guardian editing a child's. The Zod
+   * schema (profile.schemas.ts) already excludes account_id/is_child from
+   * `patch`; 20260825130000_profile_immutable_columns.sql freezes them at
+   * the database layer too. */
+  async updateProfile(auth: AuthContext, profileId: string, patch: ProfilePatch): Promise<AnyProfileDto> {
+    if (!this.dbFactory) {
+      throw AppError.internal();
+    }
+    const db = this.dbFactory.forUser(auth);
+    const scope = await requireProfileScope(db, profileId, ['full_management']);
+
+    const values: Record<string, unknown> = {};
+    if (patch.display_name !== undefined) values.display_name = patch.display_name;
+    if (patch.date_of_birth !== undefined) values.date_of_birth = patch.date_of_birth;
+
+    const updated = await db.update<ProfileRow>('profile', { id: profileId }, values, PROFILE_COLUMNS);
+    if (!updated) {
+      // The scope check above already confirmed access; a null result here
+      // means the row vanished between the check and the write (e.g.
+      // deleted concurrently) — treat as not-found, not a server error.
+      throw AppError.notFound('Profile not found.');
+    }
+    return toProfileDto({ ...updated, access_scope: scope });
   }
 }

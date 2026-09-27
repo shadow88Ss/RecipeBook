@@ -10,29 +10,38 @@ import path from 'node:path';
 import { Client, Pool } from 'pg';
 
 const ADMIN_URL = process.env.TEST_DATABASE_ADMIN_URL ?? 'postgresql://postgres:test_local_only_pw@127.0.0.1:5432/postgres';
-const TEST_DB_NAME = 'recipebook_api_test';
+const DEFAULT_TEST_DB_NAME = 'recipebook_api_test';
 
 const MIGRATIONS_DIR = path.resolve(__dirname, '../../../supabase/migrations');
 const SHIM_FILE = path.resolve(__dirname, '../fixtures/auth-shim.sql');
 const SHIM_AFTER_MIGRATION = '20260825120900_audit_event.sql';
 
-function testDbUrl(): string {
+function testDbUrl(dbName: string): string {
   const url = new URL(ADMIN_URL);
-  url.pathname = `/${TEST_DB_NAME}`;
+  url.pathname = `/${dbName}`;
   return url.toString();
 }
 
-export async function rebuildTestDatabase(): Promise<Pool> {
+/**
+ * Each integration test FILE must pass its own distinct `dbName` (e.g. the
+ * file's own name). Vitest runs test files in parallel by default, and this
+ * function drops-then-creates a database by name — two files racing on the
+ * same name corrupts both (a `create database` colliding with a concurrent
+ * `drop`/`create`, or one file's rebuild wiping data another file is mid-
+ * test on). Defaults to the original fixed name so any pre-existing
+ * single-file caller (Layer 4A's profiles.api.test.ts) needs no change.
+ */
+export async function rebuildTestDatabase(dbName: string = DEFAULT_TEST_DB_NAME): Promise<Pool> {
   const admin = new Client({ connectionString: ADMIN_URL });
   await admin.connect();
   try {
-    await admin.query(`drop database if exists ${TEST_DB_NAME}`);
-    await admin.query(`create database ${TEST_DB_NAME}`);
+    await admin.query(`drop database if exists ${dbName}`);
+    await admin.query(`create database ${dbName}`);
   } finally {
     await admin.end();
   }
 
-  const client = new Client({ connectionString: testDbUrl() });
+  const client = new Client({ connectionString: testDbUrl(dbName) });
   await client.connect();
   try {
     const files = (await readdir(MIGRATIONS_DIR)).filter((f) => f.endsWith('.sql')).sort();
@@ -47,5 +56,5 @@ export async function rebuildTestDatabase(): Promise<Pool> {
     await client.end();
   }
 
-  return new Pool({ connectionString: testDbUrl() });
+  return new Pool({ connectionString: testDbUrl(dbName) });
 }

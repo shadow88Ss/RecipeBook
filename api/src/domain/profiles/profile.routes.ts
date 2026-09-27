@@ -6,7 +6,7 @@ import { Router } from 'express';
 import { paginationQuerySchema, type PaginationQuery } from '../../lib/pagination';
 import { validate } from '../../middleware/validate';
 import { AppError } from '../../lib/errors';
-import { profileIdParamSchema } from './profile.schemas';
+import { profileIdParamSchema, profilePatchSchema } from './profile.schemas';
 import type { ProfileService } from './profile.service';
 
 export function createProfileRouter(service: ProfileService): Router {
@@ -47,6 +47,28 @@ export function createProfileRouter(service: ProfileService): Router {
       next(err);
     }
   });
+
+  // PATCH /v1/profiles/:profile_id — Layer 4B §2. full_management only;
+  // service.updateProfile enforces the scope and throws the same
+  // non-disclosing 404 as GET when the caller has no access at all, or a
+  // 403 when they have view_only/pediatric access but not full_management.
+  router.patch(
+    '/:profile_id',
+    validate({ params: profileIdParamSchema, body: profilePatchSchema }),
+    async (req, res, next) => {
+      if (!req.auth) {
+        next(AppError.unauthenticated());
+        return;
+      }
+      try {
+        const { profile_id } = req.params as unknown as { profile_id: string };
+        const dto = await service.updateProfile(req.auth, profile_id, req.body);
+        res.status(200).json(dto);
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
 
   return router;
 }

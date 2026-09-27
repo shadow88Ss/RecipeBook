@@ -14,6 +14,7 @@ import request from 'supertest';
 import { createApp } from '../../src/app';
 import { logger } from '../../src/lib/logger';
 import { PgHarnessProfileRepository } from '../helpers/pgHarnessProfileRepository';
+import { PgHarnessScopedDbFactory } from '../helpers/pgHarnessScopedDb';
 import { rebuildTestDatabase } from '../helpers/testDb';
 import { seedScenario, SEED } from '../helpers/seed';
 import { signTestToken, TEST_JWT_SECRET } from '../helpers/jwt';
@@ -26,6 +27,7 @@ beforeAll(async () => {
   await seedScenario(pool);
   app = createApp({
     profileRepository: new PgHarnessProfileRepository(pool),
+    scopedDbFactory: new PgHarnessScopedDbFactory(pool),
     jwtSecret: TEST_JWT_SECRET,
     logger,
   });

@@ -150,7 +150,7 @@ Constraint: at most one active (`revoked_at IS NULL`) row per `(guardian_account
 |---|---|---|---|---|---|---|---|---|
 | id | uuid | not null | — | PK | system_computed | — | no | — |
 | profile_id | uuid | not null | — | FK → Profile | system_computed | — | no | index |
-| goal_type | enum(`weight_loss`,`maintenance`,`weight_gain`,`micronutrient_improvement`,`fiber_improvement`,`other`) | not null | — | — | user_entered / guardian_entered | fixed set; pediatric profiles restricted to safe subset per Master §10.3 | yes | — |
+| goal_type | enum(`weight_loss`,`maintenance`,`weight_gain`,`micronutrient_improvement`,`fiber_improvement`,`other`) | not null | — | — | user_entered / guardian_entered | fixed set; a pediatric safe subset is intended per Master §10.3, but Master §10.3 currently states only qualitative product principles, not a concrete subset of these six values — **not yet enforced** (Layer 4B API Report, "Deferred/specification gaps"); all six remain selectable for a child profile until an approved specification defines the subset | yes | — |
 | target_weight_kg | numeric | nullable | — | — | user_entered | positive, plausible range | yes | — |
 | target_date | date | nullable | — | — | user_entered | future date | yes | — |
 | notes | text | nullable | — | — | user_entered | length limit | yes | — |
