@@ -19,6 +19,9 @@ export const FOOD = {
   chickpeaFlour: 'f5a00000-0000-4000-8000-000000000004',
   aiOnly: 'f5a00000-0000-4000-8000-000000000005',
   percentFood: 'f5a00000-0000-4000-8000-000000000006',
+  /** No FoodAlias at all — reachable only through canonical_name search. */
+  lentils: 'f5a00000-0000-4000-8000-000000000007',
+  lentilSoup: 'f5a00000-0000-4000-8000-000000000008',
 } as const;
 
 export const SERVING = {
@@ -44,6 +47,8 @@ export async function seedFoodFixtures(pool: Pool): Promise<void> {
     [FOOD.chickpeaFlour, 'fixture_chickpea_flour', 'legumes', 'trusted_database', 0.41, 'ai_matched'],
     [FOOD.aiOnly, 'fixture_ai_only_food', null, 'ai_matched', null, null],
     [FOOD.percentFood, 'fixture_percent_food', null, 'trusted_database', null, null],
+    [FOOD.lentils, 'fixture_lentils', 'legumes', 'trusted_database', null, null],
+    [FOOD.lentilSoup, 'fixture_soup_base', 'soups', 'trusted_database', null, null],
   ];
   for (const row of foods) {
     await pool.query(
@@ -64,6 +69,7 @@ export async function seedFoodFixtures(pool: Pool): Promise<void> {
     [FOOD.chickpeaFlour, 'en-IN', 'Besan', true, 'trusted_database'],
     [FOOD.aiOnly, 'en', 'Chickpea snack', false, 'ai_matched'],
     [FOOD.percentFood, 'en', '100% juice', true, 'trusted_database'],
+    [FOOD.lentilSoup, 'en', 'Fixture lentils soup', true, 'trusted_database'],
   ];
   for (const row of aliases) {
     await pool.query('insert into food_alias (food_id, locale, alias_text, is_primary, source) values ($1, $2, $3, $4, $5)', row);

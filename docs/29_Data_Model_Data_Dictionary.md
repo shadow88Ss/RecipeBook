@@ -306,7 +306,7 @@ Indexes: `(profile_id, meal_log_id)`, `(status)`.
 | canonical_name | text | not null | — | — | trusted_database | language-neutral internal key, not a display name | no | unique |
 | category | text | nullable | — | — | trusted_database | — | no | — |
 | source | enum(`trusted_database`,`manufacturer_label`,`user_entered`,`ai_matched`) | not null | — | — | system_computed | fixed set (Master §16) | no | — |
-| density_g_per_ml | numeric | nullable | null | — | trusted_database / manufacturer_label / ai_matched | positive; set together with `density_source` | no | Layer 5A. Only path for mass ↔ volume conversion; null = the food cannot be converted across dimensions (never assumed to be water) |
+| density_g_per_ml | numeric | nullable | null | — | trusted_database / manufacturer_label / ai_matched | positive; set together with `density_source` | no | Layer 5A. Only path for mass ↔ volume conversion; null = the food cannot be converted across dimensions (1 ml = 1 g is never assumed). An `ai_matched` density is never authoritative (`30_API.md` §14, rules 2, 8) |
 | density_source | enum(`trusted_database`,`manufacturer_label`,`user_entered`,`ai_matched`) | nullable | null | — | system_computed | non-null iff `density_g_per_ml` is non-null (`food_density_source_pairing`) | no | Layer 5A. Provenance of the density value itself, independent of `source` |
 | created_at / updated_at | timestamp | not null | now() | — | system_computed | — | no | — |
 
@@ -323,7 +323,7 @@ Indexes: `(profile_id, meal_log_id)`, `(status)`.
 | id | uuid | not null | — | PK | system_computed | — | no | — |
 | food_id | uuid | not null | — | FK → Food | system_computed | — | no | index |
 | locale | text | not null | — | — | trusted_database | BCP 47 | no | — |
-| alias_text | text | not null | — | — | trusted_database / ai_matched | — | no | AI-matched aliases require validation before becoming authoritative (Master §16) |
+| alias_text | text | not null | — | — | trusted_database / ai_matched | — | no | AI-matched aliases require validation before becoming authoritative (Master §16). An `ai_matched` alias is a food-**identity** hint only; it never makes nutrient, serving-weight or density data authoritative (`30_API.md` §14, rule 8) |
 | is_primary | boolean | not null | false | — | trusted_database | at most one primary per `(food_id, locale)` | no | — |
 | source | enum(`trusted_database`,`user_entered`,`ai_matched`) | not null | — | — | system_computed | — | no | — |
 | created_at | timestamp | not null | now() | — | system_computed | — | no | — |
@@ -342,7 +342,7 @@ Unique: `(food_id, locale, alias_text)`. Index: `(locale, alias_text)` for searc
 |---|---|---|---|---|---|---|---|---|
 | id | uuid | not null | — | PK | system_computed | — | no | — |
 | food_id | uuid | not null | — | FK → Food | system_computed | — | no | index |
-| serving_description | text | not null | — | — | trusted_database | — | no | locale-specific text |
+| serving_description | text | not null | — | — | trusted_database | — | no | locale-specific text; localization is **deferred** — no `locale` column yet, returned as stored (`30_API.md` §14, rule 10) |
 | region | text | nullable | null | — | trusted_database | BCP 47 region/market subtag | no | null = region-agnostic |
 | canonical_quantity | numeric | not null | — | — | trusted_database | positive | no | — |
 | canonical_unit | text | not null | — | — | trusted_database | `g` or `ml` only (`food_serving_canonical_unit_base`, Layer 5A) | no | the two canonical base units of the conversion engine |
@@ -379,13 +379,13 @@ Unique: `(food_id, serving_description, region)`.
 | id | uuid | not null | — | PK | system_computed | — | no | — |
 | food_id | uuid | not null | — | FK → Food | system_computed | — | no | index |
 | nutrient_id | uuid | not null | — | FK → Nutrient | system_computed | — | no | index |
-| amount_per_canonical_unit | numeric | not null | — | — | trusted_database / manufacturer_label / ai_matched | non-negative | no | amount of the nutrient (in `Nutrient.unit`) per `basis_quantity` `basis_unit` of the food; column name kept from Layer 1 |
+| amount_per_canonical_unit | numeric | not null | — | — | trusted_database / manufacturer_label / ai_matched | non-negative | no | amount of the nutrient (in `Nutrient.unit`) per `basis_quantity` `basis_unit` of the food; column name kept from Layer 1. Calculations must read the explicit basis — never assume per 100 g (`30_API.md` §14, rule 1) |
 | basis_quantity | numeric | not null | 100 | — | trusted_database / manufacturer_label | positive | no | Layer 5A. Makes the reference basis explicit (previously only documented as "e.g. per 100g") |
 | basis_unit | text | not null | `g` | — | trusted_database / manufacturer_label | `g` or `ml` | no | Layer 5A |
 | source | enum(`trusted_database`,`manufacturer_label`,`user_entered`,`ai_matched`) | not null | — | — | system_computed | — | no | — |
 | created_at | timestamp | not null | now() | — | system_computed | — | no | — |
 
-Unique: `(food_id, nutrient_id, source)` — multiple sourced values per pair are intentional, not a conflict.
+Unique: `(food_id, nutrient_id, source)` — multiple sourced values per pair are intentional, not a conflict. No source is chosen at the reference-data layer; Layer 5B must define a deterministic source-resolution policy before aggregation (`30_API.md` §14, rule 9).
 
 ---
 

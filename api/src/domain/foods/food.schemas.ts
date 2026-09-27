@@ -52,17 +52,30 @@ export const foodDetailQuerySchema = z.object({
 });
 export type FoodDetailQuery = z.infer<typeof foodDetailQuerySchema>;
 
+/** display_name comes only from FoodAlias; null when the food has no
+ * alias. canonical_name is an internal key and is never substituted as a
+ * translated display label (Layer 5A final alignment, item 7). */
 export const foodSearchResultSchema = z.object({
   id: z.uuid(),
   canonical_name: z.string(),
   category: z.string().nullable(),
   source: foodDataSourceSchema,
-  display_name: z.string(),
+  display_name: z.string().nullable(),
   display_locale: z.string().nullable(),
   match: z.object({
-    alias_text: z.string(),
-    locale: z.string(),
+    /** 'alias' = a localized FoodAlias matched (primary search surface);
+     * 'canonical_name' = fallback match on the internal key. */
+    source: z.enum(['alias', 'canonical_name']),
+    text: z.string(),
+    /** The matched alias's locale; null for a canonical_name match. */
+    locale: z.string().nullable(),
     kind: z.enum(['exact', 'prefix', 'contains']),
+    /** Provenance of the matched alias; null for a canonical_name match. */
+    alias_source: aliasServingSourceSchema.nullable(),
+    /** True when the food was identified only through an ai_matched alias
+     * — an identity match the user should confirm. It says nothing about
+     * nutrient data, which is never created or trusted because of it. */
+    identity_confirmation_required: z.boolean(),
   }),
 });
 export type FoodSearchResult = z.infer<typeof foodSearchResultSchema>;
@@ -110,7 +123,7 @@ export const foodDetailDtoSchema = z.object({
   canonical_name: z.string(),
   category: z.string().nullable(),
   source: foodDataSourceSchema,
-  display_name: z.string(),
+  display_name: z.string().nullable(),
   display_locale: z.string().nullable(),
   locale: z.string(),
   region: z.string().nullable(),

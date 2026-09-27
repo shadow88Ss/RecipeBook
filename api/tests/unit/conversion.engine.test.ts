@@ -66,6 +66,7 @@ describe('unit -> unit (same dimension, no food needed)', () => {
     expect(result.precision).toEqual({ decimal_places: 6, rounding: 'half_up' });
     expect(result.conversion_version).toBe(CONVERSION_VERSION);
     expect(result.confirmation_required).toBe(false);
+    expect(result.authoritative).toBe(true);
   });
 });
 
@@ -161,8 +162,10 @@ describe('serving conversions', () => {
     const result = ok(convert({ quantity: 1, from: { serving_id: AI_SERVING }, to: { unit: 'g' } }, food));
     expect(result.quantity).toBe(30);
     expect(result.confirmation_required).toBe(true);
+    expect(result.authoritative).toBe(false);
     const viaDensity = ok(convert({ quantity: 1, from: { unit: 'ml' }, to: { unit: 'g' } }, { ...food, density: { g_per_ml: 1.03, source: 'ai_matched' } }));
     expect(viaDensity.confirmation_required).toBe(true);
+    expect(viaDensity.authoritative).toBe(false);
   });
 });
 

@@ -82,6 +82,11 @@ export interface ConvertedResult {
   /** True when any reference value used is `ai_matched` — an unvalidated
    * match may not silently become authoritative (Master §16). */
   confirmation_required: boolean;
+  /** False whenever confirmation_required is true: a result derived from an
+   * AI-generated serving weight or density is never authoritative, and a
+   * nutrition calculation must not treat it as such (Layer 5A final
+   * alignment, item 8). */
+  authoritative: boolean;
   conversion_version: string;
 }
 
@@ -252,6 +257,7 @@ export function convert(request: ConversionRequest, food: FoodConversionData | n
     steps,
     provenance,
     confirmation_required: confirmationRequired,
+    authoritative: !confirmationRequired,
     conversion_version: CONVERSION_VERSION,
   };
 }

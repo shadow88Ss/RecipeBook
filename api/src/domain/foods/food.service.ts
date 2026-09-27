@@ -60,10 +60,12 @@ interface SearchRow {
   canonical_name: string;
   category: string | null;
   source: ReferenceSource;
-  display_name: string;
+  display_name: string | null;
   display_locale: string | null;
-  matched_alias: string;
-  matched_locale: string;
+  match_source: 'alias' | 'canonical_name';
+  matched_text: string;
+  matched_locale: string | null;
+  matched_alias_source: FoodAliasDto['source'] | null;
   match_rank: number;
   locale_rank: number;
 }
@@ -93,9 +95,12 @@ export class FoodService {
       display_name: row.display_name,
       display_locale: row.display_locale,
       match: {
-        alias_text: row.matched_alias,
+        source: row.match_source,
+        text: row.matched_text,
         locale: row.matched_locale,
         kind: MATCH_KIND[row.match_rank] ?? 'contains',
+        alias_source: row.matched_alias_source,
+        identity_confirmation_required: row.matched_alias_source === 'ai_matched',
       },
     }));
     return paginateInMemory(results, query);
@@ -164,7 +169,8 @@ export class FoodService {
       canonical_name: food.canonical_name,
       category: food.category,
       source: food.source,
-      display_name: display?.alias_text ?? food.canonical_name,
+      // Never canonical_name: it is an internal key, not a display label.
+      display_name: display?.alias_text ?? null,
       display_locale: display?.locale ?? null,
       locale: query.locale,
       region,

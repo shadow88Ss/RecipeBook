@@ -83,9 +83,9 @@ describe('GET /v1/foods — search', () => {
       display_name: 'Chickpeas',
       display_locale: 'en',
       source: 'trusted_database',
-      match: { alias_text: 'Chickpeas', locale: 'en', kind: 'prefix' },
+      match: { source: 'alias', text: 'Chickpeas', locale: 'en', kind: 'prefix', alias_source: 'trusted_database', identity_confirmation_required: false },
     });
-    expect(res.body.data[3].match).toMatchObject({ alias_text: 'Chickpea snack' });
+    expect(res.body.data[3].match).toMatchObject({ text: 'Chickpea snack', alias_source: 'ai_matched', identity_confirmation_required: true });
 
     const exact = await search({ q: 'CHICKPEAS' });
     expect(exact.body.data[0].match.kind).toBe('exact');
@@ -101,7 +101,7 @@ describe('GET /v1/foods — search', () => {
       id: FOOD.chickpeas,
       display_name: 'حمص حب',
       display_locale: 'ar-AE',
-      match: { alias_text: 'حمص', locale: 'ar', kind: 'exact' },
+      match: { source: 'alias', text: 'حمص', locale: 'ar', kind: 'exact' },
     });
 
     const englishQueryArabicLocale = await search({ q: 'garbanzo', locale: 'ar' });
@@ -128,8 +128,14 @@ describe('GET /v1/foods — search', () => {
 
     const percent = await search({ q: '%' });
     expect(percent.body.data.map((f: { id: string }) => f.id)).toEqual([FOOD.percentFood]);
+    // '_' is literal too: it matches no alias, only canonical_name keys
+    // that really contain an underscore — never "any single character".
     const underscore = await search({ q: '_' });
-    expect(underscore.body.data).toEqual([]);
+    expect(underscore.body.data.length).toBeGreaterThan(0);
+    for (const food of underscore.body.data) {
+      expect(food.match.source).toBe('canonical_name');
+      expect(food.canonical_name).toContain('_');
+    }
   });
 
   it('returns an empty page (not an error) when nothing matches', async () => {
@@ -156,6 +162,111 @@ describe('GET /v1/foods — search', () => {
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('VALIDATION_ERROR');
     }
+  });
+});
+
+describe('Final alignment — canonical_name search fallback (item 7)', () => {
+  it('finds a food by exact canonical_name, and still labels it only from its aliases', async () => {
+    const res = await search({ q: 'fixture_chickpeas_cooked', locale: 'ar-AE' });
+    expect(res.body.data[0]).toMatchObject({
+      id: FOOD.chickpeas,
+      display_name: 'حمص حب',
+      display_locale: 'ar-AE',
+      match: { source: 'canonical_name', text: 'fixture_chickpeas_cooked', locale: null, kind: 'exact', alias_source: null },
+    });
+  });
+
+  it('finds a food by canonical_name prefix, with "_" also matched as a space', async () => {
+    const raw = await search({ q: 'fixture_lent' });
+    expect(raw.body.data.map((f: { id: string }) => f.id)).toEqual([FOOD.lentils]);
+    expect(raw.body.data[0].match).toMatchObject({ source: 'canonical_name', kind: 'prefix' });
+
+    const spaced = await search({ q: 'Fixture Chickpea' });
+    const byCanonical = spaced.body.data.filter((f: { match: { source: string } }) => f.match.source === 'canonical_name');
+    // Both are prefix matches; the shorter key ranks first (deterministic tiebreak).
+    expect(byCanonical.map((f: { id: string }) => f.id)).toEqual([FOOD.chickpeaFlour, FOOD.chickpeas]);
+    expect(byCanonical.every((f: { match: { kind: string } }) => f.match.kind === 'prefix')).toBe(true);
+  });
+
+  it('never exposes canonical_name as display_name for a food with no alias', async () => {
+    const res = await search({ q: 'fixture_lentils' });
+    expect(res.body.data[0]).toMatchObject({ id: FOOD.lentils, canonical_name: 'fixture_lentils', display_name: null, display_locale: null });
+    const detail = await request(app).get(`/v1/foods/${FOOD.lentils}`).set('Authorization', auth());
+    expect(detail.body).toMatchObject({ canonical_name: 'fixture_lentils', display_name: null, aliases: [] });
+  });
+
+  it('prefers a localized alias match over a canonical_name match for the same food', async () => {
+    // "chickpeas" is an exact alias AND a canonical_name substring.
+    const res = await search({ q: 'chickpeas' });
+    expect(res.body.data[0]).toMatchObject({ id: FOOD.chickpeas, match: { source: 'alias', text: 'Chickpeas', kind: 'exact' } });
+  });
+
+  it('ranks an alias-matched food ahead of a better canonical_name match on another food', async () => {
+    // fixture_lentils matches "fixture lentils" EXACTLY by canonical_name;
+    // fixture_soup_base matches only as an alias PREFIX — the alias still wins.
+    const res = await search({ q: 'fixture lentils' });
+    expect(res.body.data.map((f: { id: string }) => f.id)).toEqual([FOOD.lentilSoup, FOOD.lentils]);
+    expect(res.body.data[0].match).toMatchObject({ source: 'alias', kind: 'prefix' });
+    expect(res.body.data[1].match).toMatchObject({ source: 'canonical_name', kind: 'exact' });
+  });
+});
+
+describe('Final alignment — AI identity vs nutrition authority (item 8)', () => {
+  it('an ai_matched alias identifies a food (flagged for confirmation) but creates no nutrient data', async () => {
+    const before = await pool.query('select count(*)::int as n from food_nutrient');
+
+    const found = await search({ q: 'chickpea snack' });
+    expect(found.body.data[0]).toMatchObject({
+      id: FOOD.aiOnly,
+      match: { source: 'alias', alias_source: 'ai_matched', identity_confirmation_required: true },
+    });
+
+    const detail = await request(app).get(`/v1/foods/${FOOD.aiOnly}`).set('Authorization', auth());
+    expect(detail.status).toBe(200);
+    expect(detail.body.nutrients).toEqual([]);
+    expect(detail.body.density).toBeNull();
+    expect(detail.body.servings).toEqual([]);
+
+    const conversion = await convertFood(FOOD.aiOnly, { quantity: 1, from: { unit: 'cup_us' }, to: { unit: 'g' } });
+    expect(conversion.body).toMatchObject({ status: 'unresolved', reason: 'density_unavailable' });
+
+    const after = await pool.query('select count(*)::int as n from food_nutrient');
+    expect(after.rows[0].n).toBe(before.rows[0].n);
+    const own = await pool.query('select count(*)::int as n from food_nutrient where food_id = $1', [FOOD.aiOnly]);
+    expect(own.rows[0].n).toBe(0);
+  });
+
+  it('a conversion using ai_matched serving weight or density is never authoritative', async () => {
+    const density = await convertFood(FOOD.chickpeaFlour, { quantity: 100, from: { unit: 'ml' }, to: { unit: 'g' } });
+    expect(density.body).toMatchObject({ status: 'converted', confirmation_required: true, authoritative: false });
+    const serving = await convertFood(FOOD.chickpeaFlour, { quantity: 1, from: { serving_id: SERVING.aiScoop }, to: { unit: 'g' } });
+    expect(serving.body).toMatchObject({ confirmation_required: true, authoritative: false });
+    const trusted = await convertFood(FOOD.flour, { quantity: 1, from: { unit: 'cup_us' }, to: { unit: 'g' } });
+    expect(trusted.body).toMatchObject({ confirmation_required: false, authoritative: true });
+  });
+});
+
+describe('Final alignment — conversion rules (items 2, 4)', () => {
+  it('every generic household unit stays unresolved, never defaulted to a regional system', async () => {
+    for (const unit of ['cup', 'tbsp', 'tsp', 'fl_oz', 'pint', 'quart', 'gallon']) {
+      const res = await request(app).post('/v1/units/convert').set('Authorization', auth()).send({ quantity: 1, from_unit: unit, to_unit: 'ml' });
+      expect(res.body).toMatchObject({ status: 'unresolved', reason: 'ambiguous_unit' });
+      expect(res.body.candidates.length).toBeGreaterThan(1);
+      const viaFood = await convertFood(FOOD.flour, { quantity: 1, from: { unit }, to: { unit: 'g' } });
+      expect(viaFood.body).toMatchObject({ status: 'unresolved', reason: 'ambiguous_unit' });
+    }
+  });
+
+  it('mass <-> volume without food density stays unresolved (1 ml is never assumed to be 1 g)', async () => {
+    for (const [from, to] of [['ml', 'g'], ['g', 'ml'], ['l', 'kg']]) {
+      const res = await convertFood(FOOD.chickpeas, { quantity: 1, from: { unit: from }, to: { unit: to } });
+      expect(res.body).toMatchObject({ status: 'unresolved', reason: 'density_unavailable' });
+      const noFood = await request(app).post('/v1/units/convert').set('Authorization', auth()).send({ quantity: 1, from_unit: from, to_unit: to });
+      expect(noFood.body).toMatchObject({ status: 'unresolved', reason: 'incompatible_dimensions' });
+    }
+    // A mass serving still cannot be expressed in volume without density.
+    const serving = await convertFood(FOOD.chickpeas, { quantity: 1, from: { serving_id: SERVING.chickpeasCan }, to: { unit: 'cup_us' } });
+    expect(serving.body).toMatchObject({ status: 'unresolved', reason: 'density_unavailable' });
   });
 });
 
