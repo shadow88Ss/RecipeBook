@@ -372,6 +372,7 @@ Unique: `(food_id, serving_description, region)`.
 ## 18. FoodNutrient
 
 **Purpose:** a sourced nutrient amount for a Food, per canonical reference quantity (Master §16 — multiple sourced values coexist rather than overwriting).
+**Scope:** **global/reference nutrition data** — no owner column, readable by every authenticated account, written only by trusted ingestion/admin workflows. Personal user-entered nutrition values are **not** stored here (they belong to a future profile/product-scoped storage model), and AI estimates are **not** stored here as global nutrition truth (Layer 5C final boundary, `food_nutrient_global_source`).
 **PII:** no. **Health:** no. **Child-sensitive:** no.
 **Retention:** reference data. **Deletion:** curated. **Export:** n/a. **Audit:** curation changes logged.
 
@@ -380,10 +381,10 @@ Unique: `(food_id, serving_description, region)`.
 | id | uuid | not null | — | PK | system_computed | — | no | — |
 | food_id | uuid | not null | — | FK → Food | system_computed | — | no | index |
 | nutrient_id | uuid | not null | — | FK → Nutrient | system_computed | — | no | index |
-| amount_per_canonical_unit | numeric | not null | — | — | trusted_database / manufacturer_label / ai_matched | non-negative | no | amount of the nutrient (in `Nutrient.unit`) per `basis_quantity` `basis_unit` of the food; column name kept from Layer 1. Calculations must read the explicit basis — never assume per 100 g (`30_API.md` §14, rule 1) |
+| amount_per_canonical_unit | numeric | not null | — | — | trusted_database / manufacturer_label | non-negative | no | amount of the nutrient (in `Nutrient.unit`) per `basis_quantity` `basis_unit` of the food; column name kept from Layer 1. Calculations must read the explicit basis — never assume per 100 g (`30_API.md` §14, rule 1) |
 | basis_quantity | numeric | not null | 100 | — | trusted_database / manufacturer_label | positive | no | Layer 5A. Makes the reference basis explicit (previously only documented as "e.g. per 100g") |
 | basis_unit | text | not null | `g` | — | trusted_database / manufacturer_label | `g` or `ml` | no | Layer 5A |
-| source | enum(`trusted_database`,`manufacturer_label`,`user_entered`,`ai_matched`) | not null | — | — | system_computed | — | no | — |
+| source | enum(`trusted_database`,`manufacturer_label`,`user_entered`,`ai_matched`) | not null | — | — | system_computed | new/updated rows: `trusted_database` or `manufacturer_label` only (`food_nutrient_global_source`, migration `20260930120000`) | no | the enum is shared with Food and keeps all four values; `user_entered`/`ai_matched` are rejected for this table. `manufacturer_label` is representable, but exact-product resolution waits for Product/Barcode. The constraint is `NOT VALID`: any pre-existing `user_entered`/`ai_matched` row is retained (not deleted) for review and still excluded by the engine; `VALIDATE CONSTRAINT` once reviewed |
 | created_at | timestamp | not null | now() | — | system_computed | — | no | — |
 
 Unique: `(food_id, nutrient_id, source)` — multiple sourced values per pair are intentional, not a conflict. The reference-data layer never chooses a source; the Layer 5B engine does, per its source-resolution policy (`30_API.md` §15): only `trusted_database`/`manufacturer_label` are authoritative, both present ⇒ `ambiguous_nutrient_source`, never summed or averaged. A stored amount of 0 is a **known zero**; the absence of a row is **unknown** — ingestion must not insert 0 for a nutrient the source does not report.

@@ -14,6 +14,10 @@ import { seedScenario, SEED } from '../helpers/seed';
 import { F, SRV, seedNutritionFixtures } from '../helpers/nutritionFixtures';
 import { signTestToken, TEST_JWT_SECRET } from '../helpers/jwt';
 import { CANONICAL_NUTRIENTS } from '../../src/domain/nutrition/vocabulary';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+
+const BOUNDARY_MIGRATION = path.resolve(__dirname, '../../../supabase/migrations/20260930120000_food_nutrient_global_source_boundary.sql');
 
 let pool: Pool;
 let app: ReturnType<typeof createApp>;
@@ -182,17 +186,94 @@ describe('Micronutrient projection and authority visibility', () => {
     expect(Object.keys(body.summary)).toEqual(['energy_kcal', 'protein_g', 'carbohydrate_g', 'fat_g', 'fiber_g']);
   });
 
-  it('authority classes are visible downstream (calculation, excluded records, food detail)', async () => {
-    const body = await calculate([{ food_id: F.bar, quantity: 40, unit: 'g' }, { food_id: F.aiIdentity, quantity: 100, unit: 'g' }]);
+  it('authority classes are visible downstream (calculation and food detail)', async () => {
+    // Excluded ai_matched / user_entered records carry their authority class
+    // too; that is asserted in tests/unit/vocabulary.test.ts, because the
+    // global food_nutrient table can no longer hold such records.
+    const body = await calculate([{ food_id: F.bar, quantity: 40, unit: 'g' }, { food_id: F.rice, quantity: 100, unit: 'g' }]);
     const barProtein = body.items[0].nutrients.find((n: { nutrient_key: string }) => n.nutrient_key === 'protein');
     expect(barProtein.source).toMatchObject({ source: 'manufacturer_label', authority: 'exact_product' });
-    const aiEnergy = body.items[1].nutrients.find((n: { nutrient_key: string }) => n.nutrient_key === 'energy');
-    expect(aiEnergy.excluded).toEqual([expect.objectContaining({ source: 'ai_matched', authority: 'non_authoritative_inference' })]);
-    const aiProtein = body.items[1].nutrients.find((n: { nutrient_key: string }) => n.nutrient_key === 'protein');
-    expect(aiProtein.excluded).toEqual([expect.objectContaining({ source: 'user_entered', authority: 'personal_user_confirmed' })]);
+    const riceProtein = body.items[1].nutrients.find((n: { nutrient_key: string }) => n.nutrient_key === 'protein');
+    expect(riceProtein.source).toMatchObject({ source: 'trusted_database', authority: 'global_reference' });
 
     const detail = await request(app).get(`/v1/foods/${F.rice}`).set('Authorization', auth());
     expect(detail.body.nutrients[0]).toMatchObject({ authority: 'global_reference' });
     expect(detail.body.nutrients.find((n: { nutrient_key: string }) => n.nutrient_key === 'protein')).toMatchObject({ nutrient_role: 'macronutrient' });
+  });
+});
+
+describe('Final boundary: food_nutrient is global reference data only', () => {
+  const insertNutrient = (source: string, foodId: string = F.noEnergy) =>
+    pool.query(
+      "insert into food_nutrient (food_id, nutrient_id, amount_per_canonical_unit, source, basis_quantity, basis_unit) select $1, id, 1, $2::food_data_source, 100, 'g' from nutrient where canonical_key = 'iron'",
+      [foodId, source],
+    );
+
+  it('1: a trusted_database row is accepted through trusted setup', async () => {
+    await expect(insertNutrient('trusted_database')).resolves.toMatchObject({ rowCount: 1 });
+  });
+
+  it('manufacturer_label stays representable', async () => {
+    await expect(insertNutrient('manufacturer_label')).resolves.toMatchObject({ rowCount: 1 });
+  });
+
+  it('2: a user_entered row is rejected', async () => {
+    await expect(insertNutrient('user_entered')).rejects.toThrow(/food_nutrient_global_source/);
+  });
+
+  it('3: an ai_matched row is rejected', async () => {
+    await expect(insertNutrient('ai_matched')).rejects.toThrow(/food_nutrient_global_source/);
+  });
+
+  it('an existing row cannot be re-sourced to user_entered or ai_matched', async () => {
+    for (const source of ['user_entered', 'ai_matched']) {
+      await expect(pool.query('update food_nutrient set source = $2::food_data_source where food_id = $1', [F.rice, source])).rejects.toThrow(
+        /food_nutrient_global_source/,
+      );
+    }
+  });
+
+  it('authenticated clients still cannot write food_nutrient at all', async () => {
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      await client.query('set local role authenticated');
+      await expect(
+        client.query("insert into food_nutrient (food_id, nutrient_id, amount_per_canonical_unit, source) select $1, id, 1, 'trusted_database' from nutrient where canonical_key = 'zinc'", [
+          F.rice,
+        ]),
+      ).rejects.toThrow(/permission denied|row-level security/);
+    } finally {
+      await client.query('rollback');
+      client.release();
+    }
+  });
+
+  it('historical rows are retained, not deleted: the migration adds the constraint NOT VALID', async () => {
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      // Simulate a database that already held a legacy personal/AI row
+      // before the boundary migration ran.
+      await client.query('alter table food_nutrient drop constraint food_nutrient_global_source');
+      await client.query(
+        "insert into food_nutrient (food_id, nutrient_id, amount_per_canonical_unit, source) select $1, id, 7, 'user_entered' from nutrient where canonical_key = 'protein'",
+        [F.aiIdentity],
+      );
+      await client.query(await readFile(BOUNDARY_MIGRATION, 'utf8'));
+
+      const kept = await client.query("select count(*)::int as n from food_nutrient where food_id = $1 and source = 'user_entered'", [F.aiIdentity]);
+      expect(kept.rows[0].n).toBe(1);
+      const constraint = await client.query("select convalidated from pg_constraint where conname = 'food_nutrient_global_source'");
+      expect(constraint.rows).toEqual([{ convalidated: false }]);
+      await expect(
+        client.query("insert into food_nutrient (food_id, nutrient_id, amount_per_canonical_unit, source) select $1, id, 1, 'ai_matched' from nutrient where canonical_key = 'energy'", [
+          F.aiIdentity,
+        ]),
+      ).rejects.toThrow(/food_nutrient_global_source/);
+    } finally {
+      await client.query('rollback');
+      client.release();
+    }
   });
 });

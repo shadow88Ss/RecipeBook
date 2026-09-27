@@ -236,11 +236,14 @@ describe('P-S: source resolution, AI authority and provenance', () => {
     expect(agg('protein')).toMatchObject({ value: null, coverage: 'unavailable', missing: [{ index: 0, status: 'ambiguous_nutrient_source' }] });
   });
 
-  it('an ai_matched value beside a trusted one is excluded, the trusted value used', async () => {
+  // Exclusion of ai_matched / user_entered FoodNutrient records by the engine
+  // is covered in tests/unit/nutrition.engine.test.ts with in-memory records:
+  // the global food_nutrient table no longer accepts those sources (Layer 5C
+  // final boundary; see layer5c.api.test.ts).
+  it('a trusted value is used with nothing excluded when no other source competes', async () => {
     const { itemNutrient } = await calc([{ food_id: F.competing, quantity: 50, unit: 'g' }]);
     const energy = itemNutrient(0, 'energy');
-    expect(energy).toMatchObject({ status: 'resolved', value: 100, source: { source: 'trusted_database' } });
-    expect(energy.excluded).toEqual([expect.objectContaining({ source: 'ai_matched', reason: 'ai_matched_not_authoritative' })]);
+    expect(energy).toMatchObject({ status: 'resolved', value: 100, source: { source: 'trusted_database' }, excluded: [] });
   });
 
   it('R: an AI-matched identity with no trusted nutrition produces no nutrition at all', async () => {
@@ -249,8 +252,8 @@ describe('P-S: source resolution, AI authority and provenance', () => {
 
     const { body, itemNutrient, agg } = await calc([{ food_id: F.aiIdentity, quantity: 100, unit: 'g' }]);
     for (const n of body.items[0]?.nutrients ?? []) expect(n.value).toBeNull();
-    expect(itemNutrient(0, 'energy')).toMatchObject({ status: 'not_authoritative', excluded: [{ source: 'ai_matched', reason: 'ai_matched_not_authoritative' }] });
-    expect(itemNutrient(0, 'protein')).toMatchObject({ status: 'not_authoritative', excluded: [{ source: 'user_entered', reason: 'user_entered_not_permitted' }] });
+    expect(itemNutrient(0, 'energy')).toMatchObject({ status: 'no_data', value: null });
+    expect(itemNutrient(0, 'protein')).toMatchObject({ status: 'no_data', value: null });
     expect(body.aggregate.coverage_summary).toEqual({ complete: 0, partial: 0, unavailable: VOCABULARY_SIZE });
     expect(agg('energy').value).toBeNull();
   });

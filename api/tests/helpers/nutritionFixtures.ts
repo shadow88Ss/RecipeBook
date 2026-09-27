@@ -34,7 +34,7 @@ export const F = {
   juice: id(1, 4), // per 100 ml, NO density
   bar: id(1, 5), // manufacturer label, per 40 g basis
   competing: id(1, 6), // trusted + manufacturer protein; trusted + ai energy
-  aiIdentity: id(1, 7), // ai_matched identity, only ai_matched / user_entered nutrients
+  aiIdentity: id(1, 7), // ai_matched identity with no nutrient data (global food_nutrient rejects ai_matched/user_entered)
   noEnergy: id(1, 8), // macros but no energy value
   spinach: id(1, 9), // iron (mg) and vitamin D (mcg)
   thirds: id(1, 10), // 1 g protein per 300 g — each 100 g is exactly 1/3 g
@@ -115,10 +115,6 @@ export async function seedNutritionFixtures(pool: Pool): Promise<void> {
     [F.competing, NUT.protein, 9, 'trusted_database', 100, 'g'],
     [F.competing, NUT.protein, 11, 'manufacturer_label', 100, 'g'],
     [F.competing, NUT.energy, 200, 'trusted_database', 100, 'g'],
-    [F.competing, NUT.energy, 999, 'ai_matched', 100, 'g'],
-
-    [F.aiIdentity, NUT.energy, 450, 'ai_matched', 100, 'g'],
-    [F.aiIdentity, NUT.protein, 7, 'user_entered', 100, 'g'],
 
     [F.noEnergy, NUT.protein, 10, 'trusted_database', 100, 'g'],
     [F.noEnergy, NUT.carbohydrate, 20, 'trusted_database', 100, 'g'],

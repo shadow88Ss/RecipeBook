@@ -479,7 +479,7 @@ describe('RLS and schema guarantees (direct database checks)', () => {
     await expect(pool.query("update food set density_g_per_ml = 1 where id = $1", [FOOD.chickpeas])).rejects.toThrow(/food_density_source_pairing/);
     await expect(pool.query("update food set density_g_per_ml = 0, density_source = 'trusted_database' where id = $1", [FOOD.chickpeas])).rejects.toThrow(/check/);
     await expect(
-      pool.query("insert into food_nutrient (food_id, nutrient_id, amount_per_canonical_unit, source, basis_unit) values ($1, $2, 1, 'user_entered', 'oz')", [FOOD.flour, NUTRIENT.protein]),
+      pool.query("insert into food_nutrient (food_id, nutrient_id, amount_per_canonical_unit, source, basis_unit) values ($1, $2, 1, 'trusted_database', 'oz')", [FOOD.flour, NUTRIENT.protein]),
     ).rejects.toThrow(/check/);
     const { rows } = await pool.query('select basis_quantity, basis_unit from food_nutrient where food_id = $1 limit 1', [FOOD.chickpeas]);
     expect(rows[0]).toEqual({ basis_quantity: 100, basis_unit: 'g' });

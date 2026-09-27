@@ -12,6 +12,7 @@ import {
   type NutrientDefinition,
 } from '../../src/domain/nutrition/nutrition.engine';
 import { projectAggregateSummary, projectItemSummary, SUMMARY_FIELDS } from '../../src/domain/nutrition/nutritionSummary';
+import { resolveNutrientSource, type FoodNutrientRecord } from '../../src/domain/nutrition/sourceResolution';
 import { CANONICAL_NUTRIENT_BY_KEY, CANONICAL_NUTRIENTS, NUTRIENT_KEYS } from '../../src/domain/nutrition/vocabulary';
 
 const REQUIRED_KEYS = [
@@ -74,6 +75,16 @@ describe('authority classification', () => {
     expect(authorityOf('ai_matched')).toBe('non_authoritative_inference');
     expect(isGlobalReferenceAuthority('user_entered')).toBe(false);
     expect(isGlobalReferenceAuthority('ai_matched')).toBe(false);
+  });
+
+  it('excluded ai_matched / user_entered records carry their authority class (engine-level; the global table rejects them)', () => {
+    const record = (id: string, source: FoodNutrientRecord['source']): FoodNutrientRecord => ({ id, nutrient_id: 'n', amount: 1, basis_quantity: 100, basis_unit: 'g', source });
+    const resolution = resolveNutrientSource([record('t', 'trusted_database'), record('a', 'ai_matched'), record('u', 'user_entered')]);
+    expect(resolution).toMatchObject({ status: 'selected', record: { id: 't' } });
+    expect(resolution.excluded).toEqual([
+      { food_nutrient_id: 'a', source: 'ai_matched', authority: 'non_authoritative_inference', reason: 'ai_matched_not_authoritative' },
+      { food_nutrient_id: 'u', source: 'user_entered', authority: 'personal_user_confirmed', reason: 'user_entered_not_permitted' },
+    ]);
   });
 });
 
