@@ -90,3 +90,32 @@ A separate, explicit action creates an `EffectiveTargetSnapshot` (per `29_Data_M
 - Concrete endpoint-by-endpoint contracts for individual modules (food logging, recipe library, analytics, coaching, etc.) — those are defined in their respective phase documents and must conform to the conventions above.
 - GraphQL, in any form.
 - Actual route implementation, middleware code, or generated OpenAPI/schema artifacts — this document defines the contract rules those artifacts must satisfy, not the artifacts themselves.
+
+---
+
+## 12. Layer 4A Foundation (implemented)
+
+Layer 4A (`api/`, TypeScript/Express) implements the reusable foundation this document leaves open. Feature endpoints (food logging, recipes, meal planning, imports, wearables, etc.) still conform to everything above; this section fixes the concrete shapes that were previously "cursor- or offset-based, chosen per-resource" or "a typed wrapper if required."
+
+**Error envelope (§6):**
+```json
+{ "error": { "code": "VALIDATION_ERROR", "message": "...", "requestId": "...", "details": { } } }
+```
+`details` is present only for errors that have safe, structured extra information (e.g. `VALIDATION_ERROR`'s field-level issues). Fixed codes for Phase 1 (`api/src/lib/errors.ts`): `VALIDATION_ERROR` (400), `UNAUTHENTICATED` (401), `FORBIDDEN` (403 — reserved; not currently returned by any Layer 4A endpoint, see below), `NOT_FOUND` (404), `CONFLICT` (409), `RATE_LIMITED` (429), `INTERNAL_ERROR` (500).
+
+**Non-disclosing authorization failure (§4, §6):** a `profile_id` that does not exist and a `profile_id` the caller is not authorized for return the identical `404 NOT_FOUND` response — never a `403` (which would confirm the profile's existence to an Account with no access to it) and never a silent fallback. This is why `FORBIDDEN` is reserved but unused by the Profile endpoints specifically; a future endpoint where confirming existence is not itself sensitive may use `403` instead, deliberately, per that endpoint's own module spec.
+
+**Pagination (§8):** cursor-based, fixed as the one convention for every future list endpoint. Query parameters `cursor` (opaque, caller must not decode/construct it) and `limit` (default 20, max 100). Response wrapper: `{ "data": [...], "pagination": { "nextCursor": string | null, "limit": number } }` (the "typed wrapper" §6 anticipates).
+
+**Idempotency (§7):** an `Idempotency-Key` request header, scoped per `(Account, route, key)`. Reusing a key with a different request body is a `409 CONFLICT`. This is transport-level retry-safety (never double-apply one HTTP write), distinct from `ImportJob`'s own domain-level idempotency keyed on `idempotency_key`/`canonical_url`/`content_fingerprint` (§7 above) — a future import endpoint may use both for different reasons. No endpoint requires this header yet; import endpoints are the first expected consumer and are not implemented in Layer 4A.
+
+**Authentication (§4):** Supabase Auth access tokens are verified locally (HS256, the project's JWT secret) by API middleware, deriving the caller's Account only from the token's verified `sub` claim — never from any client-supplied value. This is one layer of the defense-in-depth chain fixed by Layer 4A: **Supabase authentication → API Account/Profile authorization → PostgreSQL RLS**. The API's authorization check is never treated as a substitute for RLS: every database read/write for a profile-scoped request still runs with the caller's own forwarded token (via Supabase's PostgREST/RPC endpoints, `@supabase/supabase-js`), never a service-role credential, so RLS is enforced independently of, and in addition to, the API-layer check.
+
+**Guardian scope context (§4, `33_Security_and_Privacy.md` §2):** authorization resolves to one of `full_management` / `view_only` / `pediatric_weight_management` (the same value `profile_access_scope()` returns — the API never re-derives this independently of the database function that RLS itself uses), not a flattened boolean. Feature endpoints added later read this scope to decide permitted operations.
+
+**Safe projections (§10, `33_Security_and_Privacy.md` §9.3/§9.4):** a `pediatric_weight_management` caller's Profile response omits `account_id`, `created_at`, and `deleted_at`, returning only `id`, `display_name`, `is_child`, `date_of_birth`, `access_scope`. Direct-owner/`full_management`/`view_only` callers receive the standard projection (adds `account_id`, `created_at`). No endpoint returns a raw database row.
+
+**Implemented endpoints (feature APIs remain out of scope — see §11):**
+- `GET /health` — unauthenticated liveness check.
+- `GET /v1/profiles` — every Profile visible to the authenticated Account (owned, plus child profiles via an active `GuardianAuthorization`), paginated per the convention above.
+- `GET /v1/profiles/{profile_id}` — a single Profile, safely projected per its resolved access scope.
