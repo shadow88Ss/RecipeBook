@@ -1,0 +1,28 @@
+-- Phase 1 — Layer 3: remove the incidental UNIQUE constraint on account.email.
+--
+-- Found during Layer 3 provisioning/attack testing ("matching email alone
+-- does not merge unrelated identities" / "do not automatically merge
+-- Accounts merely because two providers return the same email address").
+--
+-- account.email carried `unique` since Layer 1 (20260825120200), before any
+-- multi-provider provisioning scenario was exercised end-to-end. That
+-- constraint was never part of the documented identity/security model —
+-- 37_Authentication_and_Login.md has always been explicit that
+-- provider_subject_id (via AuthIdentity), never email, is the matching key
+-- — but it was never stress-tested against two distinct Supabase Auth users
+-- who happen to share an email (a real, expected case when Supabase's
+-- automatic-linking setting is left off, which is required precisely so
+-- this platform does not auto-merge on email). With the constraint in
+-- place, provisioning the second such user's Account fails outright,
+-- turning "do not merge" into "cannot sign in at all" for the second user —
+-- an availability bug directly caused by a constraint that contradicts an
+-- explicit, already-approved requirement.
+--
+-- This is a narrow, safe correction, not a security weakening: email was
+-- never a security or authorization boundary anywhere in the approved
+-- model (Account/Profile access always resolves through auth.uid()/
+-- GuardianAuthorization, never through email), so removing uniqueness on
+-- it does not create any new access path. Implemented as a new migration,
+-- per Layer 3's migration rule; 20260825120200_account_auth_profile.sql
+-- is not edited.
+alter table account drop constraint account_email_key;

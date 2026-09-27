@@ -84,3 +84,62 @@ At minimum, authentication test coverage must include: Apple sign-in, Google sig
 - Literal Supabase Auth configuration (provider client IDs, redirect URIs, RLS policy SQL) — implementation detail, not specification.
 - Independent child/teen authentication — excluded per §6 unless separately approved.
 - Any second authentication or token system — explicitly prohibited by §1 and Master §7.2/§21/§34.
+
+---
+
+## 11. Account Provisioning (implemented)
+
+Provisioning of `Account` and `AuthIdentity` rows is implemented as a **database trigger on Supabase Auth's own `auth.identities` table**, not application/API code — consistent with §1 (Supabase Auth is the sole authority) and with there being no backend project yet.
+
+**Why `auth.identities`, not `auth.users`:** a new provider identity appears in `auth.identities` both on first signup (alongside a new `auth.users` row) and when an existing Account later links an additional provider (no new `auth.users` row). Triggering on `auth.identities` covers both cases with one mechanism, matching §7 (an Account may have multiple `AuthIdentity` records added over time).
+
+**Why this requires no proof-of-ownership logic of its own:** `auth.identities` is populated exclusively by Supabase Auth's own verified OAuth/email flows — it is not client-writable. By the time a row appears there, Supabase has already verified the provider's proof. The trigger only mirrors an already-verified fact into `public.auth_identity`/`public.account`; it does not perform verification itself.
+
+**Provisioning logic (per new `auth.identities` row):**
+1. Map Supabase's `provider` string to the fixed `auth_identity_provider` enum (`email`/`google`/`apple`); ignore silently if it doesn't match one of the three approved methods (defensive — should not occur given Supabase project configuration limits enabled providers to these three).
+2. Derive `provider_subject_id` from `identity_data->>'sub'` (the OIDC/OAuth subject claim, present for every Supabase identity regardless of internal schema version) — never from email.
+3. `INSERT ... ON CONFLICT (id) DO NOTHING` into `account`, keyed on `auth.identities.user_id` (which is, by design, the same value as `account.id` — see §2). Idempotent and concurrency-safe: a race between two near-simultaneous provisioning attempts for the same user resolves to exactly one `account` row via the existing primary key.
+4. `INSERT ... ON CONFLICT (provider, provider_subject_id) DO NOTHING` into `auth_identity`. Idempotent and concurrency-safe via the existing unique constraint (`29_Data_Model_Data_Dictionary.md` §2) — a repeated or retried callback can never create a duplicate.
+5. If the Account has no `Profile` yet, create exactly one adult `Profile` (`is_child = false`). Never a child Profile — matches §6 and Master §10. Idempotent: gated on `not exists (select 1 from profile where account_id = ...)`.
+
+**Anti-merge guarantee, by construction:** `account.id` is always `auth.identities.user_id` — a single Supabase-assigned UUID. Two different Supabase users who happen to share an email address are, and remain, two different `auth.users` rows and therefore two different `account` rows; nothing in this trigger, or anywhere else in the schema, ever keys off email for identity resolution or merging. Email-based Account merging would require a distinct, explicitly-designed, and separately-approved workflow — none exists, and none is implied by this mechanism.
+
+**AuthIdentity column immutability:** once created, an `auth_identity` row's `account_id`, `provider`, `provider_subject_id`, and `linked_at` are frozen (enforced by trigger, `20260825122200_auth_identity_immutable_columns.sql`) — only `unlinked_at` may ever change. This closes a gap where an Account's ordinary RLS-permitted UPDATE on its own `auth_identity` row (originally scoped only to *which row*, not *which columns*) could otherwise rewrite the row's identity-defining fields after the fact.
+
+---
+
+## 12. External Configuration Still Required
+
+Nothing below is implemented by this repository — each requires an external provider console and/or a live Supabase project, neither of which exists in this development environment. Recorded here as the exact remaining setup, not fabricated as done:
+
+**Google:**
+- A Google Cloud Console project with an OAuth 2.0 Client ID (Web application type, as Supabase's OAuth flow requires) and the correct authorized redirect URI (`https://<project-ref>.supabase.co/auth/v1/callback`).
+- The resulting Client ID/Secret entered into the Supabase dashboard's Google provider configuration (Authentication → Providers → Google), enabling the provider.
+- Mobile-side: the platform-specific OAuth client configuration (iOS/Android) for the native Google sign-in SDK flow, if a native (rather than web-redirect) flow is used.
+
+**Apple:**
+- An Apple Developer account with a registered App ID, a Services ID configured for Sign in with Apple, a Sign in with Apple key, and the associated Team ID/Key ID.
+- These values entered into the Supabase dashboard's Apple provider configuration.
+- The app's bundle identifier registered and associated with the Services ID for the native iOS flow.
+
+**Supabase project (both providers, and email/password):**
+- A live Supabase project (this environment has never been connected to one).
+- The two new migrations in this Layer (§11) applied to that project via the Supabase CLI/migration pipeline.
+- Email provider settings (confirmation email template, redirect URL, rate limits) reviewed in the dashboard — Supabase's defaults are used unless a product decision changes them; no such decision has been made yet.
+
+None of the above can be completed from within this repository or this session — they require dashboard/console access this environment does not have.
+
+---
+
+## 13. Mobile Integration Contract (not implemented — no mobile project exists)
+
+No mobile application exists in this repository yet (confirmed by direct inspection — no `package.json`, Expo project, or any application code is present). Per this Layer's scope, no screens or client code are built to "demonstrate" authentication. This section records the contract the eventual mobile client (`22_Mobile_Application.md`, not yet written) must satisfy, so that work starts from an agreed contract rather than inventing one ad hoc:
+
+1. Use the Supabase client SDK (`@supabase/supabase-js` via Expo, or the native Supabase Swift/Kotlin SDK) for all three approved sign-in methods — never a hand-rolled OAuth or password flow.
+2. Store only what the SDK itself manages in platform secure storage (iOS Keychain / Android Keystore, via Expo SecureStore or equivalent) — the client never independently persists a raw access or refresh token outside the SDK's own session storage.
+3. After a successful sign-in, register a `DeviceSession` row (device name, device type, a reference to the SDK session — never the raw token) via an authenticated API call — this is an API-layer responsibility (`30_API.md`), not something the client fabricates locally.
+4. Every subsequent API request carries the Supabase session's access token plus an explicit `profile_id` (§5) — the client never assumes the server will "remember" which Profile was last selected; Profile selection is re-sent, and re-validated server-side, every request.
+5. Biometric unlock (§3) gates *local app reopening/action confirmation* only — it calls the platform biometric API and, on success, allows the already-stored SDK session to be used; it never itself authenticates against Supabase or creates any server-side credential.
+6. Logout calls the SDK's sign-out, then marks the local `DeviceSession` row revoked via an authenticated API call before clearing local session state. Logout-all calls the SDK's global sign-out equivalent and expects the API to have marked every `DeviceSession` row for that Account revoked (§11 of `33_Security_and_Privacy.md`'s RLS input table already permits an Account to update all of its own `DeviceSession` rows in one statement).
+
+This contract is a requirement for whichever future phase builds the mobile project — nothing here is implemented as mobile code.
