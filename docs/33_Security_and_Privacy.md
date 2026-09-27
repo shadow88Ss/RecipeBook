@@ -41,6 +41,25 @@ Every Profile-scoped table (MealLog, MealItem, Goal, NutritionTarget, ClinicianT
 
 Per the NFR security requirement and `DEVICE_TRUST.md`, actions that materially change guardian authorization, delete an account, or export sensitive data require a fresh reauthentication signal from Supabase Auth (recent session / step-up), not merely a valid long-lived session token. The exact reauthentication mechanism is a `37_Authentication_and_Login.md` concern; this document only fixes that such actions are in-scope for that requirement.
 
+### 2.5 Cross-Guardian Administration Boundary
+
+**Approved principle: managing the CHILD does not imply authority to manage ANOTHER GUARDIAN.** This applies to every `GuardianAuthorization` scope, including `full_management` — a scope that grants broad authority over a child Profile's own data (Goal, MealLog, ClinicianTarget, etc.) grants **no** authority whatsoever over a *different* guardian's `GuardianAuthorization` row for that same child. Specifically, holding `full_management` on a child does not by itself permit an Account to:
+
+- revoke another guardian's authorization;
+- modify another guardian's `authorization_scope`;
+- replace another guardian's authorization;
+- grant authorization to a new guardian (delegation/invitation).
+
+`granted_by_account_id` is provenance (who performed a grant), never an implicit administrative capability over guardians other than the one it references. No "primary guardian" concept exists in Phase 1.
+
+For the current version, an Account may only:
+- self-grant its own first (`bootstrap`) authorization for a child Profile it created — the one and only case `profile.account_id` acts as a trust anchor for a child profile, per §2.2;
+- relinquish (revoke) **its own** authorization, where the approved workflow permits it.
+
+Cross-guardian authorization administration — adding a second or subsequent guardian, or altering/revoking another guardian's grant — is **not part of ordinary `GuardianAuthorization` scopes** in Phase 1. It must be implemented later through a separately designed, explicitly authorized guardian-management/administrative workflow (e.g. an invitation-and-acceptance flow, or a service-role-mediated administrative action) — not inferred from `full_management` or any other ordinary scope.
+
+This does not remove multi-guardian support as a data-model capability: multiple simultaneously-active `GuardianAuthorization` rows for one child remain fully supported, isolated from each other, and independently scoped and revocable (§2.2) — only the *mechanism* for an ordinary authenticated client to add a second guardian is deferred to that future workflow, rather than granted through `full_management` today.
+
 ---
 
 ## 3. Child Data Minimization (aligned with Master §10)
@@ -174,6 +193,14 @@ When those modules exist, this scope is intended to extend to the authorized chi
 
 This scope must never automatically extend to: cycle data, pregnancy data, postpartum data, breastfeeding data, Account/security information, another guardian's private information, security/audit records, or any future sensitive-health module not listed above. None of the cycle/pregnancy/postpartum/breastfeeding entities exist in the Phase 1 schema yet (they remain deferred per `29_Data_Model_Data_Dictionary.md` §34); this exclusion is currently satisfied because there is nothing yet to restrict, and must be enforced explicitly — not assumed — when those tables are created.
 
-### 9.3 Profile field-level privacy
+### 9.3 Profile field-level privacy — pediatric API projection requirement
 
-RLS controls rows, not columns. `profile`'s current column set (`id`, `account_id`, `display_name`, `is_child`, `date_of_birth`, `created_at`, `deleted_at`) is narrow enough that no field is themselves the kind of "sensitive domain" data §9.2 excludes, but `account_id` (identifying the creating/primary guardian Account) is attribution about a *different party*, not information "required for nutrition, growth, activity and pediatric safety." Row-level security cannot withhold that single column while still allowing the row. **Requirement for the future API/service layer**: a `pediatric_weight_management` caller's Profile read should be served through a projection that excludes `account_id` (and, as administrative rather than clinical fields, `created_at`/`deleted_at`) — either an explicit field allowlist in the API response, or a dedicated `security_barrier` view, rather than the full row. This is not implemented at the RLS layer in Phase 1; it is recorded here as a requirement for whichever later phase builds the API projection.
+RLS controls rows, not columns. `profile`'s current column set (`id`, `account_id`, `display_name`, `is_child`, `date_of_birth`, `created_at`, `deleted_at`) is narrow enough that no field is itself the kind of "sensitive domain" data §9.2 excludes, but `account_id` (identifying the creating/primary guardian Account) is attribution about a *different party*, not information required for nutrition, growth, activity, or pediatric safety. Row-level security cannot withhold that single column while still allowing the row.
+
+**Requirement for the future API/service layer:** a `pediatric_weight_management` caller's Profile read must be served through a projection/DTO — an explicit field allowlist in the API response, or a dedicated `security_barrier` view — exposing only fields required for nutrition, growth, activity, and pediatric safety. `account_id` must **not** be exposed through that projection. `created_at`/`deleted_at` must also remain internal unless a later requirement establishes a specific need for them. This is not implemented at the RLS layer in Phase 1; it is recorded here as a requirement for whichever later phase builds the API projection.
+
+### 9.4 WearableConnection field-level privacy — pediatric API projection requirement
+
+`pediatric_weight_management` holds row-level SELECT on `WearableConnection` (§ table above) so a guardian can see whether a supported wearable is connected, its provider, and safe status/last-sync information. The raw row may also carry internal integration metadata (e.g. `sync_cursor`, retry/error internals) that should not necessarily reach this scope through a client-facing API, even though RLS permits reading the row.
+
+**Requirement for the future API/service layer:** the REST API must return a **safe pediatric WearableConnection projection/DTO**, not the raw row, to a `pediatric_weight_management` caller. That projection must **not** include: credentials, tokens, or secrets (none are modeled directly on this table today, but none must ever be added to it without re-reviewing this requirement); internal `sync_cursor` values; unnecessary provider identifiers beyond what identifies the connected service to the user; or internal error/debug information. No API implementation is required or performed in this RLS layer — this is a recorded requirement for whichever later phase builds that endpoint.
