@@ -55,6 +55,12 @@ export function fromNumber(value: number): Rational {
   return parseDecimal(String(value));
 }
 
+export const ZERO: Rational = { n: 0n, d: 1n };
+
+export function add(a: Rational, b: Rational): Rational {
+  return make(a.n * b.d + b.n * a.d, a.d * b.d);
+}
+
 export function mul(a: Rational, b: Rational): Rational {
   return make(a.n * b.n, a.d * b.d);
 }

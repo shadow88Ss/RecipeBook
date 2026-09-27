@@ -193,3 +193,71 @@ Builds on §12/§13: same authentication → API authorization → RLS chain, er
 12. *Production food data.* No production nutrition database has been selected. No production food data is loaded; test fixtures are test-only. Source selection, licensing and ingestion are separate work.
 
 **Known limitations.** No production food data is loaded — integration tests use clearly labeled fixtures (`api/tests/helpers/foodFixtures.ts`); an approved external source and ingestion workflow are still required. Substring search is a sequential scan over `food_alias` (no trigram index yet). `FoodServing` has no `locale` column, so serving descriptions are returned as stored. Localized nutrient display labels (`(nutrient_id, locale)` lookup) are not implemented. Nutrient scaling/aggregation and source resolution are Layer 5B (rule 9). Search does a full scan over `food_alias` and `food` (rule 11).
+
+---
+
+## 15. Phase 2 Layer 5B — Deterministic Nutrition Calculation Engine (implemented)
+
+The **single authoritative nutrition calculator** (Master §5). Food logging, recipe nutrition, the daily tracker, meal planning, grocery/portion intelligence, analytics and the AI coach must call this engine (`api/src/domain/nutrition/nutrition.engine.ts`) and must not implement their own nutrition arithmetic. AI never calculates calories, macronutrients, fiber, micronutrients, serving scaling, unit conversion or aggregation; once a Food and quantity are resolved, values come only from here. No schema change was needed.
+
+**Endpoint.** `POST /v1/nutrition/calculate` — authenticated; reads reference data under the caller's own RLS-scoped token; **persists nothing** (no MealLog, Recipe or snapshot) and cannot modify Food/Nutrient data; safe to retry.
+
+Request: `{ items: [{ food_id, quantity, unit } | { food_id, quantity, serving_id }] }`, 1–50 items. `quantity` is a finite number `> 0` and `≤ 1,000,000`. `unit` must be an exact Layer 5A registry code (`g`, `kg`, `ml`, `cup_us`, …); unit synonyms (`grams`), natural-language amounts (`handful`) and regionally ambiguous measures (`cup`) are rejected — interpreting them belongs to a later input/AI layer.
+
+Response (200):
+```
+{ calculation_version: "nutrition-calculation-5b.1", conversion_version: "conversion-5a.1",
+  precision: { decimal_places: 6, rounding: "half_up" },
+  items: [{ index, food_id, canonical_name, input: { quantity, unit, serving_id },
+            normalized_quantity: { status: "converted", quantity, unit: g|ml, authoritative, steps[], provenance[] }
+                               | { status: "unresolved", reason, message },
+            resolved_nutrient_count,
+            nutrients: [{ nutrient_id, nutrient_key, unit, status, value | null, is_zero, below_output_precision,
+                          source: { food_nutrient_id, source, amount_per_basis, basis_quantity, basis_unit, quantity_in_basis_unit } | null,
+                          candidates[], excluded[], conversion_reason | null }] }],
+  aggregate: { item_count, coverage_summary: { complete, partial, unavailable },
+               nutrients: [{ nutrient_id, nutrient_key, unit, coverage, value | null, is_zero, below_output_precision,
+                             resolved_item_count, item_count, missing: [{ index, status }] }] } }
+```
+Every nutrient in the `Nutrient` vocabulary appears, per item and in the aggregate, so "unknown" is always explicit.
+
+**Invalid input vs unresolved reference data.** Invalid input is `400 VALIDATION_ERROR` with the offending path (`items.N.food_id`, `items.N.serving_id`, …): malformed/zero/negative/non-finite/oversized quantity, unsupported unit, both or neither of `unit`/`serving_id`, unknown `food_id`, a `serving_id` that does not exist or belongs to another food. Legitimately insufficient reference data is **not** an error: it is a per-nutrient status in a 200 response.
+
+**Pipeline** (per item): input → normalize the quantity to its own canonical base (`g`/`ml`) with the Layer 5A engine → for each nutrient, resolve the one authoritative FoodNutrient record → read **its** explicit `basis_quantity`/`basis_unit` (never assume per 100 g) → convert the input into `basis_unit` with the Layer 5A engine (mass ↔ volume only via stored trusted density) → `value = amount × quantity_in_basis_unit ÷ basis_quantity` → aggregate across items → round once at the output. The engine reuses Layer 5A's `convertExact` (the unrounded form of `convert`), so no conversion logic is duplicated and no converted quantity is rounded before scaling. Servings carry no nutrition of their own: `2 × (1 slice = 30 g)` → 60 g → scaled from the nutrient basis.
+
+**Nutrient statuses.** `resolved` (value present; may be exactly 0), `no_data` (no FoodNutrient record), `not_authoritative` (only `ai_matched`/`user_entered` records), `ambiguous_nutrient_source`, `basis_unreconcilable` (e.g. volume input vs per-100 g basis without density; `conversion_reason` says why), `non_authoritative_quantity` (the only path to the basis uses an `ai_matched` serving weight or density), `quantity_unresolved`. Only `resolved` carries a value; every other status has `value: null`, never 0.
+
+**Source-resolution policy** (one Food + one Nutrient → at most one record; `sourceResolution.ts`):
+1. Only `trusted_database` and `manufacturer_label` values can be authoritative.
+2. `ai_matched` values are never authoritative (§14 rule 8) — excluded and listed in `excluded[]` with `ai_matched_not_authoritative`.
+3. `user_entered` values are excluded (`user_entered_not_permitted`) because Master §16 allows user-entered label data only within a product/user-data workflow that permits it, and none exists yet. They stay identifiable.
+4. Exactly one authoritative candidate → selected, with its `food_nutrient_id`, source and basis in `source`.
+5. Both `trusted_database` **and** `manufacturer_label` → `ambiguous_nutrient_source` with both `candidates`, even if the amounts agree. The principle "label data for the exact product, database data for a generic food" needs to know whether a Food row is a generic food or an exact branded product; the current schema cannot tell (`Food` is "food/product identity", `Product`/`Barcode` are not modeled, and `Food.source` is the identity row's provenance, not its kind). Resolving this needs the Product model (`11_Barcode_and_QR.md`).
+Competing values are **never summed and never averaged**.
+
+**AI identity vs nutrition authority.** A Food identified through an `ai_matched` alias is calculated like any other Food, but only from authoritative records. If none exist, every nutrient is `no_data`/`not_authoritative` with a null value — the engine reports the limitation and never estimates.
+
+**Energy.** Energy is an ordinary nutrient: the stored authoritative energy value is scaled like any other. There is **no** energy derivation (no 4/4/9 or other factor formula); if no authoritative energy value is stored, energy is unavailable. Energy in different units (`kcal` vs `kJ`) is not interconverted (see unit normalization).
+
+**Macros, fiber, micronutrients.** One arithmetic path for every nutrient; no per-nutrient special cases. Fiber is a normal nutrient; Fiber Intelligence must consume these values. The engine is keyed by `Nutrient.canonical_key` and does not hard-code which keys are "calories"/"protein"/"carbohydrate"/"fat" — no approved nutrient vocabulary exists yet (see limitations).
+
+**Nutrient-unit normalization** (`nutrientUnits.ts`). Values are reported in the Nutrient's canonical unit (`Nutrient.unit`). Aggregation normalizes every contribution to that unit before adding. Compatible: `g`, `mg`, `mcg` (`µg`/`μg`/`ug` are spellings of `mcg`), exact SI factors. **Not** converted: `kcal` ↔ `kJ` (several factors are in use and none is approved), `IU` or any other unit ↔ anything but itself. A contribution in an incompatible unit is left out and reported in `missing[]` as `incompatible_unit`, never added. Because `FoodNutrient` stores amounts in `Nutrient.unit`, all stored values of one nutrient already share a unit today; the normalization guards the aggregation boundary.
+
+**Completeness.** Per aggregate nutrient: `complete` = a resolved value for every item; `partial` = for some items (the `value` is the sum of the known contributions — a **lower bound, not a total**; `missing[]` lists each excluded item and why); `unavailable` = no item resolved, `value: null`. Clients must not display a partial value as a complete total.
+
+**Known zero vs unknown.** A stored FoodNutrient amount of 0 is a known zero (`status: resolved`, `value: 0`, `is_zero: true`); the absence of a record is unknown (`no_data`, `value: null`). Known zeros aggregate as known values (all-zero ⇒ `complete`, `0`, `is_zero: true`). `below_output_precision: true` marks a non-zero value that rounds to 0, so it is never mistaken for a known zero.
+
+**Precision.** All arithmetic is exact rational (BigInt) — quantities, conversion factors, densities, bases and sums — so there is no floating-point accumulation and no intermediate rounding (three items of exactly ⅓ g aggregate to exactly 1 g). Rounding happens once, at the API output: 6 decimal places, ROUND_HALF_UP. Per-item values and the aggregate are each rounded from their own exact values, so rounded per-item values may not sum to the rounded aggregate in the last decimal place; the aggregate is the authoritative total. 6 dp is the API precision, not the mobile display precision.
+
+**Calculation version.** `nutrition-calculation-5b.1` (and the underlying `conversion-5a.1`) is on every response so a future persisted Recipe/Meal nutrition snapshot can record which deterministic rules produced it. Any change to these rules must bump the version.
+
+**Provenance.** Per item: the Food, the input and its normalized quantity with every conversion step and the serving/density sources used; per nutrient: the selected `food_nutrient_id`, its source, `amount_per_basis`, basis and `quantity_in_basis_unit`, the excluded records and why, or the ambiguous candidates. The domain layer keeps the exact rational values; only rounded numbers leave the API.
+
+**Security.** Authentication is required; reads use the caller's token under RLS (SELECT-only on the food tables); no service-role access; only `POST /v1/nutrition/calculate` exists on this route.
+
+**Known limitations / deferred.**
+- No approved nutrient vocabulary: which `canonical_key` is energy (and whether in kcal or kJ), whether carbohydrate is "by difference" or "by summation", etc. The engine is key-agnostic; a mobile "calories/macros" summary needs that vocabulary first.
+- `trusted_database` vs `manufacturer_label` conflicts stay ambiguous until the Product model can tell generic foods from exact products.
+- `user_entered` nutrient values are unusable until a product/user-data workflow permits them.
+- User-entered **serving weights** remain usable (Layer 5A semantics); only `ai_matched` serving weights/densities are non-authoritative.
+- Reference data is fetched per request (nutrient vocabulary capped at 1000 rows), per the §14 rule-11 development-foundation limits.

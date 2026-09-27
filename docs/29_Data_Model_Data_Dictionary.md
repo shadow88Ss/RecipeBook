@@ -363,7 +363,7 @@ Unique: `(food_id, serving_description, region)`.
 |---|---|---|---|---|---|---|---|---|
 | id | uuid | not null | — | PK | system_computed | — | no | — |
 | canonical_key | text | not null | — | — | trusted_database | e.g. `protein`, `fiber`, `vitamin_c` | no | unique |
-| unit | text | not null | — | — | trusted_database | canonical unit (g/mg/mcg) | no | — |
+| unit | text | not null | — | — | trusted_database | canonical unit (g/mg/mcg; energy in kcal) | no | the canonical **reporting** unit; every FoodNutrient amount for this nutrient is expressed in it. Layer 5B converts only within g/mg/mcg and never kcal ↔ kJ (`30_API.md` §15) |
 | created_at | timestamp | not null | now() | — | system_computed | — | no | — |
 
 ---
@@ -385,7 +385,7 @@ Unique: `(food_id, serving_description, region)`.
 | source | enum(`trusted_database`,`manufacturer_label`,`user_entered`,`ai_matched`) | not null | — | — | system_computed | — | no | — |
 | created_at | timestamp | not null | now() | — | system_computed | — | no | — |
 
-Unique: `(food_id, nutrient_id, source)` — multiple sourced values per pair are intentional, not a conflict. No source is chosen at the reference-data layer; Layer 5B must define a deterministic source-resolution policy before aggregation (`30_API.md` §14, rule 9).
+Unique: `(food_id, nutrient_id, source)` — multiple sourced values per pair are intentional, not a conflict. The reference-data layer never chooses a source; the Layer 5B engine does, per its source-resolution policy (`30_API.md` §15): only `trusted_database`/`manufacturer_label` are authoritative, both present ⇒ `ambiguous_nutrient_source`, never summed or averaged. A stored amount of 0 is a **known zero**; the absence of a row is **unknown** — ingestion must not insert 0 for a nutrient the source does not report.
 
 ---
 

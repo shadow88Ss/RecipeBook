@@ -169,12 +169,54 @@ export interface ConversionRequest {
   to: ConversionEndpoint;
 }
 
+/** Layer 5B — an unrounded conversion result. The nutrition engine
+ * consumes this so the converted quantity is never rounded before nutrient
+ * scaling (a single rounding boundary, at the API output). */
+export interface ExactConversion {
+  status: 'converted';
+  value: Rational;
+  unit: string;
+  serving_id: string | null;
+  steps: ConversionStep[];
+  provenance: ProvenanceEntry[];
+  confirmation_required: boolean;
+  authoritative: boolean;
+}
+
 /**
  * Converts `quantity` of `from` into `to`. `food` is required for serving
  * endpoints and for any mass <-> volume conversion; pass null for a
  * food-independent unit conversion.
  */
 export function convert(request: ConversionRequest, food: FoodConversionData | null): ConversionResult {
+  const exact = convertExact(request, food);
+  if (exact.status === 'unresolved') return exact;
+
+  // 4. round once
+  const rounded = roundHalfUp(exact.value, RESULT_DECIMAL_PLACES);
+  if (!isZero(exact.value) && Number(rounded) === 0) {
+    return unresolved(
+      'result_rounds_to_zero',
+      `The result is smaller than ${RESULT_DECIMAL_PLACES} decimal places of ${exact.unit}; choose a smaller target unit.`,
+    );
+  }
+
+  return {
+    status: 'converted',
+    quantity: Number(rounded),
+    unit: exact.unit,
+    serving_id: exact.serving_id,
+    precision: { decimal_places: RESULT_DECIMAL_PLACES, rounding: ROUNDING_MODE },
+    steps: exact.steps,
+    provenance: exact.provenance,
+    confirmation_required: exact.confirmation_required,
+    authoritative: exact.authoritative,
+    conversion_version: CONVERSION_VERSION,
+  };
+}
+
+/** Steps 1-3 of the conversion path with no rounding. */
+export function convertExact(request: ConversionRequest, food: FoodConversionData | null): ExactConversion | UnresolvedResult {
   const from = resolveEndpoint(request.from, food);
   if ('status' in from) return from;
   const to = resolveEndpoint(request.to, food);
@@ -239,25 +281,14 @@ export function convert(request: ConversionRequest, food: FoodConversionData | n
     ...(to.serving_id ? { reference_id: to.serving_id } : {}),
   });
 
-  // 4. round once
-  const rounded = roundHalfUp(value, RESULT_DECIMAL_PLACES);
-  if (!isZero(value) && Number(rounded) === 0) {
-    return unresolved(
-      'result_rounds_to_zero',
-      `The result is smaller than ${RESULT_DECIMAL_PLACES} decimal places of ${to.unit}; choose a smaller target unit.`,
-    );
-  }
-
   return {
     status: 'converted',
-    quantity: Number(rounded),
+    value,
     unit: to.unit,
     serving_id: to.serving_id,
-    precision: { decimal_places: RESULT_DECIMAL_PLACES, rounding: ROUNDING_MODE },
     steps,
     provenance,
     confirmation_required: confirmationRequired,
     authoritative: !confirmationRequired,
-    conversion_version: CONVERSION_VERSION,
   };
 }

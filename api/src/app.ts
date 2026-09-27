@@ -27,6 +27,8 @@ import { EffectiveTargetService } from './domain/effectiveTarget/effectiveTarget
 import { createFoodRouter, createNutrientRouter } from './domain/foods/food.routes';
 import { FoodService } from './domain/foods/food.service';
 import { createUnitRouter } from './domain/conversion/unit.routes';
+import { createNutritionRouter } from './domain/nutrition/nutrition.routes';
+import { NutritionService } from './domain/nutrition/nutrition.service';
 import type { ScopedDbFactory } from './lib/scopedDb';
 import type { Logger } from './lib/logger';
 import { AppError } from './lib/errors';
@@ -58,6 +60,7 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   const weightMeasurementService = new WeightMeasurementService(scopedDbFactory);
   const effectiveTargetService = new EffectiveTargetService(scopedDbFactory);
   const foodService = new FoodService(scopedDbFactory);
+  const nutritionService = new NutritionService(scopedDbFactory);
 
   const v1 = express.Router();
   v1.use('/profiles', requireAuth, createProfileRouter(profileService));
@@ -71,6 +74,8 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   v1.use('/foods', requireAuth, createFoodRouter(foodService));
   v1.use('/nutrients', requireAuth, createNutrientRouter(foodService));
   v1.use('/units', requireAuth, createUnitRouter());
+  // Layer 5B — the single deterministic nutrition-calculation engine.
+  v1.use('/nutrition', requireAuth, createNutritionRouter(nutritionService));
   app.use('/v1', v1);
 
   app.use((req, _res, next) => {
