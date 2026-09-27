@@ -64,7 +64,7 @@ class PgHarnessScopedDbClient implements ScopedDbClient {
     }
   }
 
-  async select<T>(table: string, { columns, eq, order, limit }: SelectOptions): Promise<T[]> {
+  async select<T>(table: string, { columns, eq, in: inFilter, order, limit }: SelectOptions): Promise<T[]> {
     assertSafeIdentifier(table);
     assertSafeColumnList(columns);
     return this.withUserContext(async (client) => {
@@ -74,6 +74,11 @@ class PgHarnessScopedDbClient implements ScopedDbClient {
         assertSafeIdentifier(key);
         values.push(value);
         conditions.push(`${key} = $${values.length}`);
+      }
+      for (const [key, list] of Object.entries(inFilter ?? {})) {
+        assertSafeIdentifier(key);
+        values.push([...list]);
+        conditions.push(`${key} = any($${values.length})`);
       }
       let sql = `select ${columns} from ${table}`;
       if (conditions.length) sql += ` where ${conditions.join(' and ')}`;
@@ -135,6 +140,18 @@ class PgHarnessScopedDbClient implements ScopedDbClient {
       const sql = `select ${fn}(${namedArgs.join(', ')}) as result`;
       const { rows } = await client.query(sql, Object.values(args));
       return rows[0]?.result as T;
+    });
+  }
+
+  async rpcRows<T>(fn: string, args: Record<string, unknown>): Promise<T[]> {
+    assertSafeIdentifier(fn);
+    return this.withUserContext(async (client) => {
+      const keys = Object.keys(args);
+      keys.forEach(assertSafeIdentifier);
+      const namedArgs = keys.map((k, i) => `${k} := $${i + 1}`);
+      const sql = `select * from ${fn}(${namedArgs.join(', ')})`;
+      const { rows } = await client.query(sql, Object.values(args));
+      return rows as T[];
     });
   }
 }

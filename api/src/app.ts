@@ -24,6 +24,9 @@ import { createWeightMeasurementRouter } from './domain/weightMeasurements/weigh
 import { WeightMeasurementService } from './domain/weightMeasurements/weightMeasurement.service';
 import { createEffectiveTargetRouter } from './domain/effectiveTarget/effectiveTarget.routes';
 import { EffectiveTargetService } from './domain/effectiveTarget/effectiveTarget.service';
+import { createFoodRouter, createNutrientRouter } from './domain/foods/food.routes';
+import { FoodService } from './domain/foods/food.service';
+import { createUnitRouter } from './domain/conversion/unit.routes';
 import type { ScopedDbFactory } from './lib/scopedDb';
 import type { Logger } from './lib/logger';
 import { AppError } from './lib/errors';
@@ -54,6 +57,7 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   const clinicianTargetService = new ClinicianTargetService(scopedDbFactory);
   const weightMeasurementService = new WeightMeasurementService(scopedDbFactory);
   const effectiveTargetService = new EffectiveTargetService(scopedDbFactory);
+  const foodService = new FoodService(scopedDbFactory);
 
   const v1 = express.Router();
   v1.use('/profiles', requireAuth, createProfileRouter(profileService));
@@ -62,6 +66,11 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   v1.use('/profiles/:profile_id/clinician-targets', requireAuth, createClinicianTargetRouter(clinicianTargetService));
   v1.use('/profiles/:profile_id/weight-measurements', requireAuth, createWeightMeasurementRouter(weightMeasurementService));
   v1.use('/profiles/:profile_id', requireAuth, createEffectiveTargetRouter(effectiveTargetService));
+  // Layer 5A — global food reference data and deterministic conversion
+  // (not profile-scoped; see food.service.ts).
+  v1.use('/foods', requireAuth, createFoodRouter(foodService));
+  v1.use('/nutrients', requireAuth, createNutrientRouter(foodService));
+  v1.use('/units', requireAuth, createUnitRouter());
   app.use('/v1', v1);
 
   app.use((req, _res, next) => {

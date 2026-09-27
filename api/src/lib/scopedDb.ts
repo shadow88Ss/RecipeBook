@@ -16,6 +16,8 @@ export interface SelectOptions {
    * codebase's own service code, never derived from client input. */
   columns: string;
   eq?: Record<string, string | boolean | number>;
+  /** Layer 5A — `column IN (...)`. An empty list matches nothing. */
+  in?: Record<string, readonly string[]>;
   order?: { column: string; ascending?: boolean };
   limit?: number;
 }
@@ -27,6 +29,9 @@ export interface ScopedDbClient {
    * nothing to update — never throws for "no matching row" specifically. */
   update<T>(table: string, eq: Record<string, unknown>, values: Record<string, unknown>, returningColumns: string): Promise<T | null>;
   rpc<T>(fn: string, args: Record<string, unknown>): Promise<T>;
+  /** Layer 5A — calls a set-returning function (`returns table (...)`)
+   * and returns every row. `rpc` above returns a single scalar value. */
+  rpcRows<T>(fn: string, args: Record<string, unknown>): Promise<T[]>;
 }
 
 export interface ScopedDbFactory {

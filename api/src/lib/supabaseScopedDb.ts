@@ -20,10 +20,13 @@ type AnyClient = SupabaseClient<any, any, any>;
 class SupabaseScopedDbClient implements ScopedDbClient {
   constructor(private readonly client: AnyClient) {}
 
-  async select<T>(table: string, { columns, eq, order, limit }: SelectOptions): Promise<T[]> {
+  async select<T>(table: string, { columns, eq, in: inFilter, order, limit }: SelectOptions): Promise<T[]> {
     let query = this.client.from(table).select(columns);
     for (const [key, value] of Object.entries(eq ?? {})) {
       query = query.eq(key, value);
+    }
+    for (const [key, values] of Object.entries(inFilter ?? {})) {
+      query = query.in(key, [...values]);
     }
     if (order) query = query.order(order.column, { ascending: order.ascending ?? true });
     if (limit) query = query.limit(limit);
@@ -52,6 +55,12 @@ class SupabaseScopedDbClient implements ScopedDbClient {
     const { data, error } = await this.client.rpc(fn, args);
     if (error) throw error;
     return data as T;
+  }
+
+  async rpcRows<T>(fn: string, args: Record<string, unknown>): Promise<T[]> {
+    const { data, error } = await this.client.rpc(fn, args);
+    if (error) throw error;
+    return (data ?? []) as T[];
   }
 }
 

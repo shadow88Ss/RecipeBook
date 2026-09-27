@@ -257,6 +257,7 @@ A value with `status = needs_confirmation` or low `confidence` must not be treat
 - `Food` and `Nutrient` remain language-independent canonical entities — no locale field, no per-language duplication.
 - `FoodAlias` gains `locale` (BCP 47, e.g. `en`, `en-AE`, `ar-AE`) — a `Food` may have multiple aliases across locales; alias lookup/search is locale-aware.
 - `FoodServing` gains an optional `region` (BCP 47 region/market subtag, nullable) for serving descriptions that vary by market (e.g. a "cup" convention that differs regionally). The underlying normalized quantity on `FoodServing` always uses a canonical deterministic unit regardless of region.
+- **Implemented (Phase 2 Layer 5A):** locale lookup follows BCP 47 truncation then the platform default `en` (`ar-AE` → `ar` → `en`); search matches aliases in every locale and ranks the caller's chain first; `FoodServing.canonical_unit` is restricted to `g`/`ml`; `FoodServing.serving_description` has no `locale` column, so serving text is returned as stored (see `30_API.md` §14).
 - Nutrient *display* labels are localization/display data, not separate `Nutrient` rows — modeled as a lookup keyed by `(nutrient_id, locale)`, not a new nutrient identity per language.
 - Any raw user- or source-provided text (e.g. an ingredient line from an import) is retained on `RawContent`/`AiExtraction` in its original language, separate from the normalized `FoodAlias`/`Food` match it resolves to.
 
@@ -324,6 +325,8 @@ This table is not fully populated in this document; producing it is the immediat
 - `WearableConnection`, `Activity`, `Workout`, `Sleep`, `Recovery` — `provider_record_id`, `provenance`, `synced_at`; `WearableConnection` additionally `sync_cursor`, `last_sync_status`, `retry_count`.
 - `FoodAlias` — `locale`.
 - `FoodServing` — `region` (nullable).
+- `Food` — `density_g_per_ml`, `density_source` (both nullable, paired; Phase 2 Layer 5A).
+- `FoodNutrient` — `basis_quantity`, `basis_unit` (Phase 2 Layer 5A).
 - `UrlSource` — `canonical_url`, `original_url`, `source_provider`, `first_seen_at`, `last_checked_at`, `latest_content_fingerprint` (finalized per §7.2; `UrlSource 1 → N ImportJob`).
 - `RawContent` — `import_job_id` (required), `url_source_id` (denormalized).
 - `RecipeVersion` — `origin_url_source_id`, `origin_import_job_id` (both nullable).

@@ -306,6 +306,8 @@ Indexes: `(profile_id, meal_log_id)`, `(status)`.
 | canonical_name | text | not null | — | — | trusted_database | language-neutral internal key, not a display name | no | unique |
 | category | text | nullable | — | — | trusted_database | — | no | — |
 | source | enum(`trusted_database`,`manufacturer_label`,`user_entered`,`ai_matched`) | not null | — | — | system_computed | fixed set (Master §16) | no | — |
+| density_g_per_ml | numeric | nullable | null | — | trusted_database / manufacturer_label / ai_matched | positive; set together with `density_source` | no | Layer 5A. Only path for mass ↔ volume conversion; null = the food cannot be converted across dimensions (never assumed to be water) |
+| density_source | enum(`trusted_database`,`manufacturer_label`,`user_entered`,`ai_matched`) | nullable | null | — | system_computed | non-null iff `density_g_per_ml` is non-null (`food_density_source_pairing`) | no | Layer 5A. Provenance of the density value itself, independent of `source` |
 | created_at / updated_at | timestamp | not null | now() | — | system_computed | — | no | — |
 
 ---
@@ -343,7 +345,7 @@ Unique: `(food_id, locale, alias_text)`. Index: `(locale, alias_text)` for searc
 | serving_description | text | not null | — | — | trusted_database | — | no | locale-specific text |
 | region | text | nullable | null | — | trusted_database | BCP 47 region/market subtag | no | null = region-agnostic |
 | canonical_quantity | numeric | not null | — | — | trusted_database | positive | no | — |
-| canonical_unit | text | not null | — | — | trusted_database | deterministic unit (e.g. grams) | no | — |
+| canonical_unit | text | not null | — | — | trusted_database | `g` or `ml` only (`food_serving_canonical_unit_base`, Layer 5A) | no | the two canonical base units of the conversion engine |
 | source | enum(`trusted_database`,`user_entered`,`ai_matched`) | not null | — | — | system_computed | — | no | — |
 | created_at | timestamp | not null | now() | — | system_computed | — | no | — |
 
@@ -377,7 +379,9 @@ Unique: `(food_id, serving_description, region)`.
 | id | uuid | not null | — | PK | system_computed | — | no | — |
 | food_id | uuid | not null | — | FK → Food | system_computed | — | no | index |
 | nutrient_id | uuid | not null | — | FK → Nutrient | system_computed | — | no | index |
-| amount_per_canonical_unit | numeric | not null | — | — | trusted_database / manufacturer_label / ai_matched | non-negative | no | e.g. per 100g |
+| amount_per_canonical_unit | numeric | not null | — | — | trusted_database / manufacturer_label / ai_matched | non-negative | no | amount of the nutrient (in `Nutrient.unit`) per `basis_quantity` `basis_unit` of the food; column name kept from Layer 1 |
+| basis_quantity | numeric | not null | 100 | — | trusted_database / manufacturer_label | positive | no | Layer 5A. Makes the reference basis explicit (previously only documented as "e.g. per 100g") |
+| basis_unit | text | not null | `g` | — | trusted_database / manufacturer_label | `g` or `ml` | no | Layer 5A |
 | source | enum(`trusted_database`,`manufacturer_label`,`user_entered`,`ai_matched`) | not null | — | — | system_computed | — | no | — |
 | created_at | timestamp | not null | now() | — | system_computed | — | no | — |
 

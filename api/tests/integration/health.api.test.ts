@@ -19,6 +19,7 @@ const stubScopedDbFactory: ScopedDbFactory = {
     },
     update: async () => null,
     rpc: async <T>() => null as unknown as T,
+    rpcRows: async () => [],
   }),
 };
 

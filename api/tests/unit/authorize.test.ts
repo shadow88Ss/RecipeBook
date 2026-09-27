@@ -9,6 +9,7 @@ function fakeDb(scope: string | null): ScopedDbClient {
     insert: vi.fn(),
     update: vi.fn(),
     rpc: vi.fn().mockResolvedValue(scope),
+    rpcRows: vi.fn(),
   };
 }
 
