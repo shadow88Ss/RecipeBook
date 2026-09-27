@@ -130,3 +130,50 @@ Per-entity inputs sufficient for RLS policies to be generated deterministically 
 | AuditEvent | may reference a subject Account/Profile | subject Account/Profile (read visibility limited/none to end user by default) | n/a | write-only by system (append); read restricted to security/audit tooling, not general user-facing API by default | yes — fully immutable, append-only |
 
 This table is the deterministic input set for writing RLS policies in Phase 1 implementation. No RLS policy SQL is authored in this specification pass.
+
+---
+
+## 9. `pediatric_weight_management` Access Matrix
+
+This resolves the gap the Phase 1 RLS Security Report flagged: `authorization_scope` fixes the value `pediatric_weight_management` (`29_Data_Model.md` §11), but until now nothing mapped it to specific tables/operations. This scope allows an authorized guardian to manage the child's nutrition and pediatric weight-management workflow. **It is not equivalent to `full_management`.**
+
+For the authorized child Profile:
+
+| Entity | Access |
+|---|---|
+| Profile | Read only, limited to information required for nutrition, growth, activity and pediatric safety |
+| ChildProfileExtension | Read only |
+| GuardianAuthorization | No management access — cannot grant, revoke, or modify another guardian's authorization |
+| Goal | SELECT + INSERT + permitted UPDATE/management |
+| NutritionTarget | SELECT + INSERT, per the existing target/supersession rules |
+| ClinicianTarget | SELECT only — this scope alone must never represent the guardian as a verified clinician or create a clinician-target row, verified or not |
+| WeightMeasurement | SELECT + INSERT; existing historical measurements remain immutable |
+| EffectiveTargetSnapshot | SELECT only |
+| MealLog | SELECT + INSERT + permitted management required for nutrition logging |
+| MealItem | SELECT + INSERT + lifecycle-permitted operations; consumed-history immutability and correction rules are unchanged |
+| Recipe | Access only where required to use recipes legitimately available to the child Profile |
+| RecipeVersion | SELECT where its parent Recipe is accessible |
+| RecipeIngredient | SELECT where its RecipeVersion is accessible |
+| RecipeInstruction | SELECT where its RecipeVersion is accessible |
+| RecipePersonalizedVariant | SELECT + permitted creation/management for variants belonging to the child Profile |
+| Food / FoodAlias / FoodServing / Nutrient / FoodNutrient | SELECT (same as every authenticated caller) |
+| Activity | SELECT |
+| Workout | SELECT |
+| WearableConnection | No management access (no connect/disconnect/sync-field writes) |
+| Sleep | No access, initially |
+| Recovery | No access, initially |
+| Account / AuthIdentity / DeviceSession | No access |
+| UrlSource / ImportJob / RawContent / AiExtraction | No direct access |
+| AuditEvent | No direct access |
+
+### 9.1 Future meal-plan / progress / grocery scope (not implemented yet)
+
+When those modules exist, this scope is intended to extend to the authorized child's: MealPlan (read/write), planned meals (read/write), plan adherence (read), nutrition adherence (read), goal progress (read), GroceryList (read/write when related to the child's meal plan), GroceryListItem (read/write). No such table exists in Phase 1 — this is recorded now so the eventual module inherits the right access shape rather than defaulting to `full_management`-equivalent or no access.
+
+### 9.2 Sensitive-domain exclusion
+
+This scope must never automatically extend to: cycle data, pregnancy data, postpartum data, breastfeeding data, Account/security information, another guardian's private information, security/audit records, or any future sensitive-health module not listed above. None of the cycle/pregnancy/postpartum/breastfeeding entities exist in the Phase 1 schema yet (they remain deferred per `29_Data_Model_Data_Dictionary.md` §34); this exclusion is currently satisfied because there is nothing yet to restrict, and must be enforced explicitly — not assumed — when those tables are created.
+
+### 9.3 Profile field-level privacy
+
+RLS controls rows, not columns. `profile`'s current column set (`id`, `account_id`, `display_name`, `is_child`, `date_of_birth`, `created_at`, `deleted_at`) is narrow enough that no field is themselves the kind of "sensitive domain" data §9.2 excludes, but `account_id` (identifying the creating/primary guardian Account) is attribution about a *different party*, not information "required for nutrition, growth, activity and pediatric safety." Row-level security cannot withhold that single column while still allowing the row. **Requirement for the future API/service layer**: a `pediatric_weight_management` caller's Profile read should be served through a projection that excludes `account_id` (and, as administrative rather than clinical fields, `created_at`/`deleted_at`) — either an explicit field allowlist in the API response, or a dedicated `security_barrier` view, rather than the full row. This is not implemented at the RLS layer in Phase 1; it is recorded here as a requirement for whichever later phase builds the API projection.
