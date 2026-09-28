@@ -404,7 +404,7 @@ Unique: `(food_id, nutrient_id, source)` — multiple sourced values per pair ar
 | created_by_account_id | uuid | nullable | null | FK → Account | system_computed | — | no | null for platform-seeded recipes |
 | created_by_profile_id | uuid | nullable | null | FK → Profile | system_computed | — | no | — |
 | visibility | enum(`private`,`shared_library`) | not null | `private` | — | user_entered | exact discovery rules owned by `10_Recipe_Library.md` | yes | — |
-| current_version_id | uuid | nullable | null | FK → RecipeVersion | system_computed | must point to a version of this Recipe | no | convenience pointer to latest accepted version |
+| current_version_id | uuid | nullable | null | FK → RecipeVersion | system_computed | must point to a version of this Recipe — enforced by `trg_recipe_current_version_belongs` (Layer 6A) | no | convenience pointer to latest accepted version; moved atomically with each new version by `create_recipe_version()` (Layer 6A) |
 | created_at / updated_at | timestamp | not null | now() | — | system_computed | — | no | — |
 
 ---
@@ -446,11 +446,14 @@ Unique: `(recipe_id, version_number)`.
 | food_id | uuid | nullable | null | FK → Food | ai_derived | — | no | null if unmatched/ambiguous |
 | raw_ingredient_text | text | not null | — | — | user_entered / ai_derived | original text as authored/imported | no (immutable) | provenance trail |
 | quantity | numeric | nullable | null | — | user_entered / ai_derived | positive | no | — |
-| unit | text | nullable | null | — | user_entered / ai_derived | — | no | — |
+| unit | text | nullable | null | — | user_entered / ai_derived | Layer 6A API: an exact Layer 5A registry unit code; exclusive with `food_serving_id`; requires `quantity` | no | — |
+| food_serving_id | uuid | nullable | null | FK → FoodServing `(food_serving_id, food_id)` | user_entered | must belong to this row's `food_id`; requires `food_id` and `quantity`; exclusive with `unit` | no | Layer 6A (`20261001120000`). Amount = `quantity` × this serving. Recipe-specific input: never creates or changes a global FoodServing |
 | match_confidence | numeric | nullable | null | — | ai_derived | present only when `food_id` was AI-matched | no | — |
 | match_status | enum(`matched`,`needs_confirmation`,`unmatched`) | not null | `needs_confirmation` | — | system_computed | — | no | Master §16/§18 |
 | sort_order | integer | not null | — | — | system_computed | — | no | — |
 | created_at | timestamp | not null | now() | — | system_computed | — | no | — |
+
+Layer 6A semantics: an ingredient counts toward recipe nutrition only when `match_status = matched`, `food_id` is set and it has `quantity` plus `unit` or `food_serving_id`. Anything else (unmatched text, `needs_confirmation`, no quantity, a count without unit) is kept verbatim and reported as unresolved, making the affected totals partial/unavailable — it is never force-matched or treated as 0 (`30_API.md` §17). A manually selected Food is stored as `matched` with `match_confidence` null. No calculated nutrient value is stored on this row.
 
 ---
 

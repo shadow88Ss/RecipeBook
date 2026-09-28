@@ -29,6 +29,9 @@ import { FoodService } from './domain/foods/food.service';
 import { createUnitRouter } from './domain/conversion/unit.routes';
 import { createNutritionRouter } from './domain/nutrition/nutrition.routes';
 import { NutritionService } from './domain/nutrition/nutrition.service';
+import { createRecipeRouter, createRecipeVariantRouter } from './domain/recipes/recipe.routes';
+import { RecipeService } from './domain/recipes/recipe.service';
+import { RecipeVariantService } from './domain/recipes/recipeVariant.service';
 import type { ScopedDbFactory } from './lib/scopedDb';
 import type { Logger } from './lib/logger';
 import { AppError } from './lib/errors';
@@ -61,6 +64,8 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   const effectiveTargetService = new EffectiveTargetService(scopedDbFactory);
   const foodService = new FoodService(scopedDbFactory);
   const nutritionService = new NutritionService(scopedDbFactory);
+  const recipeService = new RecipeService(scopedDbFactory);
+  const recipeVariantService = new RecipeVariantService(scopedDbFactory);
 
   const v1 = express.Router();
   v1.use('/profiles', requireAuth, createProfileRouter(profileService));
@@ -68,6 +73,9 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   v1.use('/profiles/:profile_id/nutrition-targets', requireAuth, createNutritionTargetRouter(nutritionTargetService));
   v1.use('/profiles/:profile_id/clinician-targets', requireAuth, createClinicianTargetRouter(clinicianTargetService));
   v1.use('/profiles/:profile_id/weight-measurements', requireAuth, createWeightMeasurementRouter(weightMeasurementService));
+  // Layer 6A — Recipe Book core (nutrition through the Layer 5B engine).
+  v1.use('/profiles/:profile_id/recipes', requireAuth, createRecipeRouter(recipeService));
+  v1.use('/profiles/:profile_id/recipe-variants', requireAuth, createRecipeVariantRouter(recipeVariantService));
   v1.use('/profiles/:profile_id', requireAuth, createEffectiveTargetRouter(effectiveTargetService));
   // Layer 5A — global food reference data and deterministic conversion
   // (not profile-scoped; see food.service.ts).

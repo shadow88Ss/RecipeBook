@@ -331,6 +331,7 @@ This table is not fully populated in this document; producing it is the immediat
 - `UrlSource` — `canonical_url`, `original_url`, `source_provider`, `first_seen_at`, `last_checked_at`, `latest_content_fingerprint` (finalized per §7.2; `UrlSource 1 → N ImportJob`).
 - `RawContent` — `import_job_id` (required), `url_source_id` (denormalized).
 - `RecipeVersion` — `origin_url_source_id`, `origin_import_job_id` (both nullable).
+- `RecipeIngredient` — `food_serving_id` (nullable; must belong to the ingredient's Food; exclusive with `unit`) (Phase 2 Layer 6A). `Recipe.current_version_id` must reference a version of the same Recipe (trigger), and a new version with its ingredients/instructions is written atomically by `create_recipe_version()` (SECURITY INVOKER, existing RLS).
 
 ## 15. Full Field-Level Data Dictionary
 

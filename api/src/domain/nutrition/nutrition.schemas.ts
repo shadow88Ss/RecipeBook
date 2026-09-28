@@ -15,11 +15,15 @@ export const MAX_CALCULATION_ITEMS = 50;
 
 const unitCodes = [...UNITS.keys()] as [string, ...string[]];
 
+/** An exact Layer 5A registry unit code. Shared with Layer 6A recipe
+ * ingredients so both accept exactly the same units. */
+export const unitCodeSchema = z.enum(unitCodes, { message: `unit must be one of: ${unitCodes.join(', ')}.` });
+
 export const calculationItemSchema = z
   .object({
     food_id: z.uuid(),
     quantity: quantitySchema,
-    unit: z.enum(unitCodes, { message: `unit must be one of: ${unitCodes.join(', ')}.` }).optional(),
+    unit: unitCodeSchema.optional(),
     serving_id: z.uuid().optional(),
   })
   .refine((item) => (item.unit === undefined) !== (item.serving_id === undefined), {

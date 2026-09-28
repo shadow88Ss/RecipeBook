@@ -14,7 +14,7 @@
 
 import { AppError } from '../../lib/errors';
 import { IN_MEMORY_PAGE_FETCH_CAP } from '../../lib/pagination';
-import type { ScopedDbFactory } from '../../lib/scopedDb';
+import type { ScopedDbClient, ScopedDbFactory } from '../../lib/scopedDb';
 import type { AuthContext } from '../../types/express';
 import { CONVERSION_VERSION, ROUNDING_MODE, type ReferenceSource, type ServingReference } from '../conversion/conversion.engine';
 import {
@@ -54,54 +54,70 @@ interface FoodNutrientRow {
   source: ReferenceSource;
 }
 
+export interface NutritionReference {
+  /** Only foods the caller can read; a missing id is absent. */
+  foods: Map<string, FoodNutritionData>;
+  vocabulary: NutrientDefinition[];
+}
+
+/** Loads everything the engine needs for these foods, under the caller's own
+ * RLS-scoped client. Shared by every engine caller (Layer 6A recipes too) so
+ * reference-data loading exists once. */
+export async function loadNutritionReference(db: ScopedDbClient, foodIdList: readonly string[]): Promise<NutritionReference> {
+  const foodIds = [...new Set(foodIdList)];
+  const [foods, servings, foodNutrients, vocabulary] = await Promise.all([
+    db.select<FoodRow>('food', { columns: 'id, canonical_name, density_g_per_ml, density_source', in: { id: foodIds } }),
+    db.select<ServingRow>('food_serving', {
+      columns: 'id, food_id, serving_description, region, canonical_quantity, canonical_unit, source',
+      in: { food_id: foodIds },
+    }),
+    db.select<FoodNutrientRow>('food_nutrient', {
+      columns: 'id, food_id, nutrient_id, amount_per_canonical_unit, basis_quantity, basis_unit, source',
+      in: { food_id: foodIds },
+    }),
+    db.select<NutrientDefinition>('nutrient', {
+      columns: 'id, canonical_key, unit, role',
+      order: { column: 'canonical_key', ascending: true },
+      limit: IN_MEMORY_PAGE_FETCH_CAP,
+    }),
+  ]);
+
+  const data = new Map<string, FoodNutritionData>();
+  for (const food of foods) {
+    data.set(food.id, {
+      food_id: food.id,
+      canonical_name: food.canonical_name,
+      density:
+        food.density_g_per_ml !== null && food.density_source !== null
+          ? { g_per_ml: food.density_g_per_ml, source: food.density_source }
+          : null,
+      servings: servings.filter((s) => s.food_id === food.id),
+      nutrients: foodNutrients
+        .filter((fn) => fn.food_id === food.id)
+        .map(
+          (fn): FoodNutrientRecord => ({
+            id: fn.id,
+            nutrient_id: fn.nutrient_id,
+            amount: fn.amount_per_canonical_unit,
+            basis_quantity: fn.basis_quantity,
+            basis_unit: fn.basis_unit,
+            source: fn.source,
+          }),
+        ),
+    });
+  }
+  return { foods: data, vocabulary };
+}
+
 export class NutritionService {
   constructor(private readonly dbFactory: ScopedDbFactory) {}
 
   async calculate(auth: AuthContext, request: NutritionCalculateRequest) {
     const db = this.dbFactory.forUser(auth);
-    const foodIds = [...new Set(request.items.map((item) => item.food_id))];
-
-    const [foods, servings, foodNutrients, vocabulary] = await Promise.all([
-      db.select<FoodRow>('food', { columns: 'id, canonical_name, density_g_per_ml, density_source', in: { id: foodIds } }),
-      db.select<ServingRow>('food_serving', {
-        columns: 'id, food_id, serving_description, region, canonical_quantity, canonical_unit, source',
-        in: { food_id: foodIds },
-      }),
-      db.select<FoodNutrientRow>('food_nutrient', {
-        columns: 'id, food_id, nutrient_id, amount_per_canonical_unit, basis_quantity, basis_unit, source',
-        in: { food_id: foodIds },
-      }),
-      db.select<NutrientDefinition>('nutrient', {
-        columns: 'id, canonical_key, unit, role',
-        order: { column: 'canonical_key', ascending: true },
-        limit: IN_MEMORY_PAGE_FETCH_CAP,
-      }),
-    ]);
-
-    const data = new Map<string, FoodNutritionData>();
-    for (const food of foods) {
-      data.set(food.id, {
-        food_id: food.id,
-        canonical_name: food.canonical_name,
-        density:
-          food.density_g_per_ml !== null && food.density_source !== null
-            ? { g_per_ml: food.density_g_per_ml, source: food.density_source }
-            : null,
-        servings: servings.filter((s) => s.food_id === food.id),
-        nutrients: foodNutrients
-          .filter((fn) => fn.food_id === food.id)
-          .map(
-            (fn): FoodNutrientRecord => ({
-              id: fn.id,
-              nutrient_id: fn.nutrient_id,
-              amount: fn.amount_per_canonical_unit,
-              basis_quantity: fn.basis_quantity,
-              basis_unit: fn.basis_unit,
-              source: fn.source,
-            }),
-          ),
-      });
-    }
+    const { foods: data, vocabulary } = await loadNutritionReference(
+      db,
+      request.items.map((item) => item.food_id),
+    );
 
     const inputs: CalculationItemInput[] = request.items.map((item, index) => {
       const food = data.get(item.food_id);
@@ -132,7 +148,7 @@ export class NutritionService {
   }
 }
 
-function toItemDto(item: ItemCalculation) {
+export function toItemDto(item: ItemCalculation) {
   const normalized =
     item.normalized.status === 'converted'
       ? {
@@ -177,7 +193,7 @@ function toItemDto(item: ItemCalculation) {
   };
 }
 
-function toAggregateDto(aggregate: AggregateNutrient[], itemCount: number) {
+export function toAggregateDto(aggregate: AggregateNutrient[], itemCount: number) {
   const coverageSummary: Record<Coverage, number> = { complete: 0, partial: 0, unavailable: 0 };
   for (const n of aggregate) coverageSummary[n.coverage] += 1;
   return {

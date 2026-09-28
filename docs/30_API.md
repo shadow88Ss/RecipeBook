@@ -225,7 +225,7 @@ Every nutrient in the `Nutrient` vocabulary appears, per item and in the aggrega
 
 **Pipeline** (per item): input → normalize the quantity to its own canonical base (`g`/`ml`) with the Layer 5A engine → for each nutrient, resolve the one authoritative FoodNutrient record → read **its** explicit `basis_quantity`/`basis_unit` (never assume per 100 g) → convert the input into `basis_unit` with the Layer 5A engine (mass ↔ volume only via stored trusted density) → `value = amount × quantity_in_basis_unit ÷ basis_quantity` → aggregate across items → round once at the output. The engine reuses Layer 5A's `convertExact` (the unrounded form of `convert`), so no conversion logic is duplicated and no converted quantity is rounded before scaling. Servings carry no nutrition of their own: `2 × (1 slice = 30 g)` → 60 g → scaled from the nutrient basis.
 
-**Nutrient statuses.** `resolved` (value present; may be exactly 0), `no_data` (no FoodNutrient record), `not_authoritative` (only `ai_matched`/`user_entered` records), `ambiguous_nutrient_source`, `basis_unreconcilable` (e.g. volume input vs per-100 g basis without density; `conversion_reason` says why), `non_authoritative_quantity` (the only path to the basis uses an `ai_matched` serving weight or density), `quantity_unresolved`. Only `resolved` carries a value; every other status has `value: null`, never 0.
+**Nutrient statuses.** `resolved` (value present; may be exactly 0), `no_data` (no FoodNutrient record), `not_authoritative` (only `ai_matched`/`user_entered` records), `ambiguous_nutrient_source`, `basis_unreconcilable` (e.g. volume input vs per-100 g basis without density; `conversion_reason` says why), `non_authoritative_quantity` (the only path to the basis uses an `ai_matched` serving weight or density), `quantity_unresolved`, and (Layer 6A, recipe aggregates only) `item_unresolved` — the item never reached the engine, e.g. an unmatched recipe ingredient (§17). Only `resolved` carries a value; every other status has `value: null`, never 0.
 
 **Source-resolution policy** (one Food + one Nutrient → at most one record; `sourceResolution.ts`):
 1. Only `trusted_database` and `manufacturer_label` values can be authoritative.
@@ -333,3 +333,74 @@ A **projection** of the Layer 5B result (`nutritionSummary.ts`): it looks up eac
 6. Ingested rows use `trusted_database` or `manufacturer_label` only; the global tables never receive `user_entered` servings/density or `user_entered`/`ai_matched` nutrient values.
 
 **Global nutrient data boundary (Layer 5C final).** `food_nutrient` is **global/reference nutrition data**. Migration `20260930120000_food_nutrient_global_source_boundary.sql` adds `food_nutrient_global_source`: new or updated rows must be `trusted_database` (trusted ingestion/admin workflows) or `manufacturer_label` (representable; exact-product resolution deferred to Product/Barcode). **Personal user-entered nutrition is not stored in `food_nutrient`** — it will belong to an approved profile/product-specific workflow and storage model (not designed yet). **AI estimates are not stored in `food_nutrient` as global nutrition truth.** The constraint is added `NOT VALID` so historical rows are never silently deleted: any pre-existing `user_entered`/`ai_matched` row is reported by the migration (`NOTICE`), kept for explicit review, still excluded by the engine, and cannot be updated in place; `alter table food_nutrient validate constraint food_nutrient_global_source` once reviewed. Authenticated clients have no write access to the table in any case (RLS, SELECT-only). The engine's exclusion of `ai_matched`/`user_entered` records is tested with in-memory records (unit tests); the integration fixtures contain only permitted sources.
+
+---
+
+## 17. Phase 2 Layer 6A — Recipe Book Core & Deterministic Recipe Nutrition (implemented)
+
+Builds on §12–§16: same authentication → API authorization → RLS chain, error envelope and cursor pagination. Uses the existing Layer 1 entities `Recipe`, `RecipeVersion`, `RecipeIngredient`, `RecipeInstruction`, `RecipePersonalizedVariant` — no second recipe system. `09_Recipe_Intelligence.md` and `10_Recipe_Library.md` are **not available in the repository**; only the deterministic core below is implemented, and everything those documents own (discovery, sharing, deletion semantics, categories/tags/ratings, favorites, import, AI) is deferred rather than invented. Migration: `20261001120000_recipe_book_core.sql`. Code: `api/src/domain/recipes/`.
+
+**Endpoints** (all under `/v1/profiles/{profile_id}`):
+
+| Method & path | Scopes | Purpose |
+|---|---|---|
+| `GET /recipes?q=&cursor=&limit=` | read | The Profile's recipes (authored under it), most recently updated first; `q` = case-insensitive title contains (NFKC, trimmed, whitespace-collapsed, 1–100 chars) |
+| `POST /recipes` | write | Create Recipe + version 1 (201, detail DTO) |
+| `GET /recipes/{recipe_id}` | read | Detail: current version, ingredients, instructions, nutrition |
+| `PATCH /recipes/{recipe_id}` | write | Create a **new** RecipeVersion (200, detail DTO) |
+| `GET /recipes/{recipe_id}/nutrition` | read | Current version's nutrition, with per-ingredient breakdown |
+| `GET /recipes/{recipe_id}/versions?cursor=&limit=` | read | Version history, newest first, `is_current` flagged |
+| `GET /recipes/{recipe_id}/versions/{version_id}` | read | One historical version with its own content and nutrition |
+| `GET /recipes/{recipe_id}/versions/{version_id}/nutrition` | read | That version's nutrition, with breakdown |
+| `GET /recipe-variants?base_recipe_id=&cursor=&limit=`, `GET /recipe-variants/{variant_id}` | read | Personalized variants of this Profile (read only) |
+
+**Authorization** — transcribed from `20260825121500_rls_recipes.sql` / `can_read_recipe` / `can_manage_recipe`, never broadened: *read* = any scope on the authoring Profile (`full_management`, `view_only`, `pediatric_weight_management` — the latter per `20260825121900`); *write* = `full_management` only (a direct adult owner resolves to `full_management`). No scope → `404` (non-disclosing); a scope that does not cover the operation → `403`. A revoked guardian has no scope. Every route filters on `created_by_profile_id = profile_id` in addition to RLS, so a recipe is never reachable through another Profile's path; `shared_library` recipes authored elsewhere are not listed (no public/community discovery). New recipes are always `private`; `visibility` is not settable in this layer.
+
+**Create** — body `{ title, description?, servings, ingredients: [...] (1–100), instructions?: [text] (0–100) }`. Array order is authoritative: ingredient `sort_order` and instruction `step_number` are assigned 1..n; clients cannot send order numbers, `match_status`, `match_confidence`, `visibility` or version numbers (undeclared fields are stripped).
+
+**Ingredient representation** — `{ text, food_id?, serving_id?, quantity?, unit? }`, stored in `RecipeIngredient`:
+- `text` → `raw_ingredient_text` (the line as written, immutable provenance).
+- `food_id` → the canonical Food the user selected; stored as `match_status: matched` (a user-confirmed match, `match_confidence: null`). Omitted → the ingredient is kept as text only, `match_status: unmatched`, `food_id: null` — never force-matched to a Food.
+- Amount: `quantity + unit` (an exact Layer 5A registry code — `g`, `kg`, `ml`, `cup_us`, …; synonyms and ambiguous `cup`/`tbsp` are rejected, as in §15) **or** `quantity + serving_id` (a FoodServing that must belong to `food_id`; new column `food_serving_id`) **or** `quantity` alone (a count such as "2 eggs") **or** nothing ("salt to taste"). `unit` and `serving_id` are exclusive; either requires `quantity`. `quantity` is finite, `> 0`, `≤ 1,000,000`.
+- The quantity is **recipe-specific input**: it never creates or changes a `FoodServing`, `Food` or `FoodNutrient` (Layer 5C authority). No calculated nutrient value is stored on a RecipeIngredient.
+- Invalid references are `400` with the path: unknown `food_id` (`ingredients.N.food_id`), a serving that does not exist or belongs to another food (`ingredients.N.serving_id`). The database enforces the same (`fk_recipe_ingredient_food_serving`, `recipe_ingredient_serving_requires_food`, `recipe_ingredient_unit_xor_serving`, `recipe_ingredient_amount_requires_quantity`).
+
+**Yield / servings** — `RecipeVersion.servings`, a positive serving count (fractional allowed, max 1000); zero, negative, NaN, Infinity and non-numbers are `400`. Required on create. A version with no yield (possible only for future imported data) reports `per_serving: null`, `per_serving_status: "servings_not_defined"`; per-serving is never computed by assuming one serving.
+
+**Versioning** — `RecipeVersion`, `RecipeIngredient`, `RecipeInstruction` are immutable (no client UPDATE/DELETE grant; Layer 1 `prevent_update` triggers block UPDATE for everyone). `PATCH` never edits a version: fields omitted from the body are carried over from the current version (`ingredients`/`instructions`, when present, replace the whole list; carried-over ingredients keep their stored match state), then `create_recipe_version()` writes version n+1 with new ingredient/instruction rows and moves `Recipe.current_version_id` (and `canonical_title`) **in one transaction**. The function is `SECURITY INVOKER` — each statement runs under the caller's existing RLS policies; it adds atomicity and serialized version numbering (`SELECT … FOR UPDATE` on the recipe), not privileges. `Recipe.current_version_id` must reference a version of the same recipe (`trg_recipe_current_version_belongs`). Concurrency: an edit is always based on the version it read; if another version became current in between (or `expected_current_version_id` is stale) the write is refused with `409 CONFLICT` and nothing is created.
+
+**Recipe nutrition** — computed on read through the Layer 5B engine, never by recipe-specific arithmetic and never by AI (`recipe.nutrition.ts`):
+```
+RecipeVersion → its RecipeIngredients (sort_order)
+  → confirmed Food + quantity + unit | FoodServing
+  → Layer 5A normalization → Layer 5B source resolution & scaling (calculateItem)
+  → aggregateNutrients                        = whole_recipe
+  → divideAggregate(servings)                 = per_serving (exact rational division)
+  → Layer 5C projectAggregateSummary          = summary for each
+```
+Response (`/nutrition`; the detail DTO embeds the same object without `ingredients`):
+```
+{ recipe_id, recipe_version_id, version_number, is_current,
+  calculation_version, conversion_version, precision, servings,
+  ingredient_count, calculated_ingredient_count,
+  whole_recipe: { summary: { energy_kcal, protein_g, carbohydrate_g, fat_g, fiber_g },
+                  item_count, coverage_summary, nutrients: [ …§15 aggregate entries… ] },
+  per_serving:  { servings, summary, item_count, coverage_summary, nutrients } | null,
+  per_serving_status: available | servings_not_defined,
+  ingredients: [{ ingredient_id, index, nutrition_status, calculation: <§15 item> | null }] }
+```
+`missing[].index` / `ingredients[].index` is the ingredient's 0-based position.
+
+**Completeness** — §15 semantics per nutrient, whole recipe and per serving alike: `complete` (every ingredient resolved), `partial` (some; the value is a **lower bound**), `unavailable` (none; `value: null`). A known zero stays `0`/`is_zero: true`; unknown is never 0. Per-serving keeps the whole-recipe coverage (dividing never makes a partial total complete). **An ingredient that cannot be calculated is never dropped**: it enters the aggregate with every nutrient `item_unresolved` (a new engine status for items that never reached the engine), so it keeps the totals partial/unavailable. Its `nutrition_status` says why: `food_unmatched`, `food_needs_confirmation` (a proposed but unconfirmed match — never counted, Master §18), `food_unavailable`, `quantity_missing`, `unit_missing`. A calculated ingredient can still have individual nutrients unresolved for §15 reasons (`no_data`, `ambiguous_nutrient_source`, `basis_unreconcilable`, …).
+
+**Summary & micronutrients** — the five summary fields for both whole recipe and per serving are the Layer 5C projection of those aggregates (no separate calculation; no 4/4/9 energy). Micronutrients are in the same generic `nutrients[]` (key + `nutrient_role`); per-serving micronutrients are the same exact division of the whole-recipe value. No second engine.
+
+**Authority** — recipe nutrition uses only what §15/§16 already permit (authoritative FoodNutrient records; `ai_matched` serving/density paths are `non_authoritative_quantity`). Creating or editing a recipe writes only recipe rows; it never writes Food, FoodServing, FoodNutrient or density data.
+
+**Historical reproducibility** — every version keeps its own immutable title, yield, ingredients (Food, quantity, unit/serving, order) and instructions; its nutrition is always calculated from **that** version's ingredients and yield, so editing a recipe never changes what an older version reports. Nutrition is not persisted: it is recomputed with the current reference data and rule set (`calculation_version`/`conversion_version` are returned). If global reference values are corrected later, a recomputed historical version reflects the correction; a frozen per-meal nutrition snapshot belongs to Meal Logging.
+
+**Future compatibility (not built).** *Meal planning:* a future PlannedMeal can reference an exact `Recipe` + `RecipeVersion` (+ `RecipePersonalizedVariant`) and a serving count; version ids are stable and version content immutable (`MealItem` already references `recipe_version_id`/`recipe_personalized_variant_id`). *Grocery:* each ingredient keeps its structured identity (`food_id`), `quantity`, `unit` or `serving_id`, order and original text, with the version's yield and the source recipe/version, so shopping requirements can later be derived without re-parsing text or reading nutrition totals.
+
+**Personalized variants** — read only. A variant references its base Recipe and base RecipeVersion, belongs to one Profile (read: `full_management`, `view_only`, `pediatric_weight_management` per RLS), and never overwrites the base. `adjustments_payload` is returned as stored; its structure is not specified (Data Dictionary §23), so creating/editing variants and variant nutrition are **deferred**.
+
+**Deferred** — `DELETE`/archive (Data Dictionary §19 defers shared-library deletion implications to `10_Recipe_Library.md`; RLS still permits a manager to delete, but no endpoint exposes it); visibility changes and shared-library/community discovery; RecipeCategory/RecipeTag/RecipeRating (Data Dictionary §34) and favorites (no approved entity); ingredient preparation/notes fields (none in the schema — kept in `text`); variant mutation and nutrition; nutrition snapshots; URL/social import, AI extraction/matching, OCR, barcode/product.

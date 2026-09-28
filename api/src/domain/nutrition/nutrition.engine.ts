@@ -78,7 +78,12 @@ export type NutrientStatus =
    * density. */
   | 'non_authoritative_quantity'
   /** The item quantity itself could not be normalized. */
-  | 'quantity_unresolved';
+  | 'quantity_unresolved'
+  /** Layer 6A — the item never reached calculateItem: it has no confirmed
+   * canonical Food or no calculable amount (e.g. an unmatched recipe
+   * ingredient). Its contribution is unknown, never 0, so it keeps the
+   * aggregate partial/unavailable instead of silently disappearing. */
+  | 'item_unresolved';
 
 export interface SelectedSource {
   food_nutrient_id: string;
@@ -273,6 +278,25 @@ export function aggregateNutrients(
       missing,
     };
   });
+}
+
+/** Contributions for an item that could not be calculated at all: every
+ * nutrient `item_unresolved`, value unknown. */
+export function unresolvedContributions(vocabulary: readonly NutrientDefinition[]): AggregateContribution[] {
+  return vocabulary.map((n) => ({ nutrient_id: n.id, status: 'item_unresolved', value: null, unit: n.unit }));
+}
+
+/**
+ * Layer 6A — divides every aggregate value by a positive divisor, exactly
+ * (e.g. whole recipe -> per serving). Coverage, counts and `missing` are
+ * carried over unchanged, so a partial total stays partial and an
+ * unavailable one stays null; a known zero stays a known zero. The same
+ * operation for every nutrient — no nutrient-specific arithmetic.
+ */
+export function divideAggregate(aggregate: readonly AggregateNutrient[], divisor: number): AggregateNutrient[] {
+  const d = fromNumber(divisor);
+  if (isZero(d)) throw new Error('divideAggregate requires a positive divisor.');
+  return aggregate.map((n) => ({ ...n, value: n.value === null ? null : div(n.value, d) }));
 }
 
 export interface NutritionCalculation {
