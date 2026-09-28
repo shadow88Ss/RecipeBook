@@ -63,11 +63,22 @@ No transition may move a `consumed` item back to `draft`, `planned`, or `confirm
   - the correction action is also written to `AuditEvent` (actor, timestamp, before/after reference).
   A consumed item is never destructively edited; every correction is additive and traceable.
 
+**Layer 8A amendment (authoritative).** Planned intent no longer uses MealItem: it lives in the separate planning domain (§3.5 below), where `PlannedMealItem` carries `draft → planned → confirmed` (or `cancelled`). `MealItem` is the actual-consumption record (`consumed` + corrections). The other MealItem enum values are retained, not removed (no destructive migration), and are unused by the official API. Master §6.6.
+
 **Layer 7A (implemented).** Direct actual-consumption logging inserts items as `consumed` (with a server-calculated immutable nutrition snapshot) rather than walking `draft → planned → confirmed`; that path remains for planning. The correction above is one atomic operation (`correct_meal_item()`), and the AuditEvent is written by a database trigger on the supersession (see `30_API.md` §18). Removing/voiding a consumed item without a replacement is deferred.
 
 ### 3.4 Optimizer eligibility (data-model consequence)
 
 Automatic optimizer/coach write access to `MealItem.status`-derived fields is limited to `draft` and `planned` states. Any service or AI agent writing to a `MealItem` must check `status` before applying an automatic change; this is a data-layer invariant, not only an application-layer convention, and should be enforced by a check/trigger where the target platform (Postgres) supports it.
+
+### 3.5 Meal Planning domain (Phase 2 Layer 8A)
+
+- `MealPlan` (Profile-owned): `name`, `description`, `start_date` ≤ `end_date`, `local_timezone` (IANA — planned dates and `scheduled_local_time` are local to it), `status`: `draft → active | cancelled`, `active → completed | cancelled`, `completed | cancelled → archived` (no automatic completion, no return to active).
+- `MealPlanDay`: one per `(meal_plan_id, plan_date)`, inside the plan range.
+- `PlannedMeal`: `meal_type` (the shared `meal_type` enum), optional `scheduled_local_time`, `notes`, `position`.
+- `PlannedMealItem`: exactly one source — a Food (`food_id` + `quantity` + `unit` **or** `food_serving_id`) or an exact RecipeVersion (`recipe_id` + `recipe_version_id` + `quantity` = servings) of a recipe of the same Profile; `status` `draft | planned | confirmed | cancelled`; at confirmation an immutable server-computed `nutrition_snapshot` (+ `nutrition_calculation_version`, `nutrition_calculated_at`, `confirmed_at`); `supersedes_planned_meal_item_id` / `superseded_by_planned_meal_item_id` for accepted replacements.
+- Confirmation state is per item; the only public confirmation today is whole-plan (`confirm_meal_plan()`), but nothing in the schema requires a plan's items to be confirmed together.
+- Relationships: `Profile 1..N MealPlan 1..N MealPlanDay 1..N PlannedMeal 1..N PlannedMealItem`; composite `(id, profile_id)` keys keep every child in its plan's Profile. No link to MealLog/MealItem yet (Layer 8B extension point: a planned→actual relation referencing stable PlannedMealItem ids, leaving both records unchanged).
 
 ---
 
@@ -338,6 +349,7 @@ This table is not fully populated in this document; producing it is the immediat
 - `RawContent` — `import_job_id` (required), `url_source_id` (denormalized).
 - `RecipeVersion` — `origin_url_source_id`, `origin_import_job_id` (both nullable).
 - `MealLog` — `local_timezone` (IANA), `notes` (Phase 2 Layer 7A).
+- New Phase 2 Layer 8A entities: `MealPlan`, `MealPlanDay`, `PlannedMeal`, `PlannedMealItem` (§3.5); `RecipeVersion` gains unique `(id, recipe_id)` as a composite FK target.
 - `MealItem` — `unit`, `nutrition_snapshot`, `nutrition_calculation_version`, `nutrition_calculated_at`; Food-vs-Recipe invariant; `(meal_log_id, profile_id)` FK; same-Profile recipe rule (Phase 2 Layer 7A).
 - `RecipeIngredient` — `food_serving_id` (nullable; must belong to the ingredient's Food; exclusive with `unit`) (Phase 2 Layer 6A). `Recipe.current_version_id` must reference a version of the same Recipe (trigger), and a new version with its ingredients/instructions is written atomically by `create_recipe_version()` (SECURITY INVOKER, existing RLS).
 

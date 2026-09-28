@@ -36,6 +36,8 @@ import { createMealRouter } from './domain/meals/meal.routes';
 import { MealService } from './domain/meals/meal.service';
 import { createDailyTrackerRouter } from './domain/dailyTracker/dailyTracker.routes';
 import { DailyTrackerService } from './domain/dailyTracker/dailyTracker.service';
+import { createMealPlanRouter } from './domain/mealPlans/mealPlan.routes';
+import { MealPlanService } from './domain/mealPlans/mealPlan.service';
 import type { ScopedDbFactory } from './lib/scopedDb';
 import type { Logger } from './lib/logger';
 import { AppError } from './lib/errors';
@@ -72,6 +74,7 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   const recipeVariantService = new RecipeVariantService(scopedDbFactory);
   const mealService = new MealService(scopedDbFactory);
   const dailyTrackerService = new DailyTrackerService(scopedDbFactory, effectiveTargetService);
+  const mealPlanService = new MealPlanService(scopedDbFactory, effectiveTargetService);
 
   const v1 = express.Router();
   v1.use('/profiles', requireAuth, createProfileRouter(profileService));
@@ -86,6 +89,8 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   v1.use('/profiles/:profile_id/meals', requireAuth, createMealRouter(mealService));
   // Layer 7B — Daily Nutrition Tracker (read model over 7A snapshots + the resolver).
   v1.use('/profiles/:profile_id/daily-tracker', requireAuth, createDailyTrackerRouter(dailyTrackerService));
+  // Layer 8A — Meal Planning (planned intent; separate from actual consumption).
+  v1.use('/profiles/:profile_id/meal-plans', requireAuth, createMealPlanRouter(mealPlanService));
   v1.use('/profiles/:profile_id', requireAuth, createEffectiveTargetRouter(effectiveTargetService));
   // Layer 5A — global food reference data and deterministic conversion
   // (not profile-scoped; see food.service.ts).

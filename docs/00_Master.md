@@ -284,6 +284,15 @@ Automatic optimizer eligibility:
 
 This state rule applies across Meal Planning, Adaptive Nutrition Coach, Daily Tracker, and AI agents.
 
+## 6.6 Amendment — planning and consumption are separate records (Phase 2 Layer 8A)
+
+The lifecycle above is realized by **two separate domains**, never by one row moving from intent to consumption:
+
+- **Planned intent** — `MealPlan → MealPlanDay → PlannedMeal → PlannedMealItem`. A PlannedMealItem moves `draft → planned → confirmed`, or to `cancelled`; a confirmed item is immutable and is changed only by an explicitly accepted **replacement** item (supersession). The optimizer rules of §6.5 apply to PlannedMealItems (`draft`/`planned`: may be optimized with user awareness; `confirmed`: suggestion only).
+- **Actual consumption** — `MealLog → MealItem` with status `consumed` plus the approved correction/supersession history (Layer 7A).
+
+A PlannedMealItem never becomes `consumed`; consumption is recorded only as a MealItem. The link between a planned item and the actual MealItem(s) that fulfil it is defined by a later layer (8B) without changing either record. The `draft/planned/confirmed/skipped/cancelled` values remain in the MealItem status enum for compatibility but are not used by the official actual-logging API.
+
 ---
 
 # 7. Account, Authentication, Profile, and Session Model

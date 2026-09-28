@@ -268,7 +268,7 @@ Index: `(profile_id, logged_date)`. Unique `(id, profile_id)` (target of MealIte
 
 ## 13. MealItem
 
-**Purpose:** an individual food/recipe item within a MealLog; the sole owner of meal lifecycle state (Master §6).
+**Purpose:** an individual food/recipe item within a MealLog — **actual consumption** (Layer 8A amendment, Master §6.6: planned intent lives in PlannedMealItem, §35; the `draft/planned/confirmed/skipped/cancelled` enum values remain but are unused by the official API).
 **PII:** no. **Health:** yes. **Child-sensitive:** conditional.
 **Retention:** Master §14.2. **Deletion:** with Profile; consumed rows are not individually user-deletable except via the correction/cancel paths. **Export:** included. **Audit:** consumed-state corrections logged to `AuditEvent` (§29_Data_Model.md §3.3).
 
@@ -665,3 +665,17 @@ All domain-specific fields: not user-editable except via an explicit `user_overr
 ## 34. Entities Deferred to Their Owning Phase
 
 Carried forward in `29_Data_Model.md` §2's entity inventory but not dictionaried at field level here, because their full shape belongs to a later phase's own module spec and nothing in Phase 1 (auth, profile, session, targets, meal lifecycle, recipe versioning/personalization, import, AI provenance, wearable provenance, audit) depends on their field-level detail yet: `RecipeCategory`, `RecipeTag`, `RecipeRating` (→ `10_Recipe_Library.md`), `Product`, `Barcode` (→ `11_Barcode_and_QR.md`), `CycleRecord`, `PregnancyProfile`, `PostpartumProfile`, `BreastfeedingProfile` (→ `18_Womens_Nutrition_Intelligence.md`), `CoachRecommendation` (→ `13_Adaptive_Nutrition_Coach.md`), `NotificationPreference` (→ `28_Notifications.md`). Each must receive its own field-level dictionary pass, in the same format as this document, before its owning phase's migrations are written.
+
+---
+
+## 35. Meal Planning entities (Phase 2 Layer 8A)
+
+Planned **intent**, separate from actual consumption (Master §6.6). `26_Meal_Planning.md` is not available; these definitions are the approved Layer 8A decisions. **PII:** no. **Health:** yes. **Child-sensitive:** conditional. **Retention:** profile-active. **Deletion:** with Profile (no client DELETE). **Export:** included. **Audit:** none beyond standard. Access: `33_Security_and_Privacy.md` §8.0/§9.1.
+
+**MealPlan** — `id` uuid PK · `profile_id` uuid FK → Profile (immutable) · `name` text 1–200 · `description` text ≤ 2000, nullable · `start_date` / `end_date` date, `start_date ≤ end_date`, ≤ 366 days (API) · `local_timezone` text, IANA identifier (validated), fixed once not draft · `status` enum(`draft`,`active`,`completed`,`cancelled`,`archived`), default `draft`; transitions draft→active (via confirmation) | cancelled, active→completed | cancelled, completed | cancelled→archived; no automatic completion · `created_by_account_id` nullable FK → Account (not exposed) · `created_at`/`updated_at`. Date range: draft — change allowed unless a planned day would fall outside; active — extension only; completed/cancelled/archived — immutable. Unique `(id, profile_id)`.
+
+**MealPlanDay** — `id` · `meal_plan_id` + `profile_id` (composite FK → MealPlan) · `plan_date` date, inside the plan range (trigger) · `created_at`. Unique `(meal_plan_id, plan_date)`. Insert-only.
+
+**PlannedMeal** — `id` · `meal_plan_day_id` + `profile_id` (composite FK → MealPlanDay) · `meal_type` (shared `meal_type` enum) · `scheduled_local_time` time, nullable, wall clock in the plan's zone · `notes` ≤ 2000 · `position` int ≥ 0 · `created_by_account_id` · `created_at`. Insert-only.
+
+**PlannedMealItem** — `id` (stable; Layer 8B links planned → actual by it) · `planned_meal_id` + `profile_id` (composite FK → PlannedMeal) · source, exactly one of: Food (`food_id`; `quantity` + `unit` (Layer 5A code) **or** `quantity` × `food_serving_id`, the serving belonging to that Food — composite FK) or Recipe (`recipe_id` + `recipe_version_id`, composite FK → RecipeVersion `(id, recipe_id)`, recipe authored by the same Profile — trigger; `quantity` = servings, no unit/serving) · `quantity` numeric > 0 · `position` · `status` enum(`draft`,`planned`,`confirmed`,`cancelled`) — created as draft/planned; draft→planned|confirmed|cancelled, planned→confirmed|cancelled; never consumed · `confirmed_at`, `nutrition_snapshot` jsonb (`planned-item-snapshot-8a.1`, same shape as the MealItem snapshot), `nutrition_calculation_version`, `nutrition_calculated_at` — all present exactly when confirmed, server-computed, application-authoritative · `supersedes_planned_meal_item_id` (a replacement of a confirmed, current item of the same planned meal; at most one live replacement) · `superseded_by_planned_meal_item_id` (set once, by confirmation of the replacement; only on confirmed rows) · `created_by_account_id` · `created_at`/`updated_at`. Confirmed rows are immutable except that one supersession write; draft/planned rows may change amount/position/status but not identity or source. Grocery derivation reads `food_id`/`food_serving_id`/`quantity`/`unit` or `recipe_id`/`recipe_version_id`/servings (and the version's RecipeIngredients) — never nutrition totals.

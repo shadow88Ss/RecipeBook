@@ -542,3 +542,51 @@ One vocabulary connects NutritionTarget / ClinicianTarget → EffectiveTargetRes
 **Pediatric boundary.** Vocabulary only: no pediatric or adult calorie targets, formulas or deficits are defined; `pediatric_weight_management` keeps exactly its existing NutritionTarget write and read access.
 
 **Deferred.** Plausible value ranges per key (Data Dictionary "plausible range per field"); kJ and IU target inputs (need approved conversion policies); a cleanup/migration tool for legacy non-canonical rows (currently interpreted or reported at read time); historical target snapshots (§19, Data Model §4.5).
+
+---
+
+## 21. Phase 2 Layer 8A — Meal Planning Core (implemented)
+
+Planned **intent**, in a domain separate from actual consumption (Master §6.6; Data Model §3.5; Data Dictionary §35). Planning never creates or changes MealLog/MealItem, Food/FoodServing/FoodNutrient, recipes or EffectiveTargetSnapshots (tested). `26_Meal_Planning.md` is not in the repository; the behaviour below is the approved Layer 8A decision set. Migration: `20261004120000_meal_planning_core.sql`. Code: `api/src/domain/mealPlans/`.
+
+**Endpoints** (under `/v1/profiles/{profile_id}/meal-plans`):
+
+| Method & path | Purpose |
+|---|---|
+| `GET /?status=&cursor=&limit=` | Plans, newest start date first (shared cursor convention) |
+| `POST /` | Create a draft plan `{ name, description?, start_date, end_date, local_timezone }` |
+| `GET /{plan}` | Full tree: days → meals → items (every item, flagged), with meal/day/plan nutrition of the current view |
+| `PATCH /{plan}` | `name`, `description`, `start_date`, `end_date`, `local_timezone` (draft only), `status` (`completed`/`cancelled`/`archived` — `active` only via /confirm) |
+| `GET /{plan}/days` | The plan's days (same tree) |
+| `POST /{plan}/days` | `{ plan_date }` — inside the range, once per date |
+| `POST /{plan}/days/{day}/meals` | `{ meal_type, scheduled_local_time? (HH:MM), notes?, position?, items?[] }` — meal and items atomically |
+| `POST /{plan}/meals/{meal}/items` | `{ items[] }` (1–50) atomically |
+| `GET /{plan}/items/{item}` | One item with full nutrients and provenance (including superseded history) |
+| `PATCH /{plan}/items/{item}` | Draft/planned only: `quantity`, `unit` or `serving_id`, `servings` (recipe), `position`, `status: planned|cancelled` |
+| `POST /{plan}/items/{item}/replace` | A draft replacement of a confirmed current item (body = one item) |
+| `GET /{plan}/nutrition` | Per-day and whole-plan planned nutrition + current-target comparison |
+| `POST /{plan}/confirm` | Whole-plan confirmation |
+
+No DELETE (cancel draft/planned items; replace confirmed ones); no actual-logging endpoint (Layer 8B).
+
+**Planned items.** `{ type: "food", food_id, quantity, unit | serving_id }` or `{ type: "recipe", recipe_id, recipe_version_id, servings }`, validated like Layer 7A items (exact Layer 5A units; serving belongs to the Food; RecipeVersion belongs to the Recipe; recipe authored by the **same Profile**; the version must have a yield; finite positive amounts). The exact `recipe_version_id` is stored — never `Recipe.current_version_id`. An explicit amount ("150 g chicken") is planned-item data and never creates a FoodServing. The source of an item is fixed; change it by cancelling and adding, or (confirmed) by replacement.
+
+**Item lifecycle.** `draft → planned | confirmed | cancelled`, `planned → confirmed | cancelled`; no `consumed`. **Current plan view** = items that are not cancelled, not superseded, and not a pending (unconfirmed) replacement; meal/day/plan totals use only current items.
+
+**Nutrition.** Draft/planned items are calculated **live** (`basis: live_calculation`) through the Layer 5B engine (Food) or Layer 6A recipe nutrition × servings (RecipeVersion), using the same snapshot builders as Layer 7A — no planning-specific arithmetic; a live value follows current reference data and is not historical truth. Confirmed items are read only from their stored snapshot (`basis: confirmed_snapshot`). Aggregation for meal, day and plan uses the engine's `aggregateCoverage` + Layer 5C summary with complete/partial/unavailable preserved; nothing planned is a known zero (`basis: no_planned_items`). `includes_unconfirmed` flags totals containing live values.
+
+**Confirmation** — `POST /{plan}/confirm` (draft or active plan): the server computes a snapshot (`planned-item-snapshot-8a.1`, with source, exact values, completeness, Layer 5B/6A provenance and `nutrition-calculation-5b.1`/`conversion-5a.1`) for **every** draft/planned item, then `confirm_meal_plan()` — in one transaction — checks that the eligible set and each item's content are exactly what was calculated (else `409`, nothing written), confirms the items, makes confirmed replacements supersede their originals, and moves a draft plan to `active`. Nothing eligible → `400`. Confirmation state is stored per item; narrower confirmation (day/meal/single replacement) can be added later without schema change but is not exposed.
+
+**Confirmed immutability and replacement.** A confirmed item cannot be edited, cancelled or deleted (API `409`; database trigger). `POST …/items/{id}/replace` creates a draft item with `supersedes_planned_meal_item_id`; the original stays current until the next `/confirm`, which confirms the replacement with its own new snapshot and sets the original's `superseded_by_planned_meal_item_id` — the original's snapshot is never recalculated. Both remain retrievable; one live replacement per original; a superseded item cannot be replaced again. Later Food/FoodServing/FoodNutrient/density changes and recipe edits do not change confirmed nutrition (tested).
+
+**Plan lifecycle and dates.** Transitions: draft→active (confirmation) | cancelled; active→completed | cancelled; completed | cancelled → archived; others `409`. No automatic completion. Days/meals/items can be added only to draft/active plans. Date range: draft — shortening that would leave a planned day outside is `409` (nothing is deleted), extension allowed; active — extension only; completed/cancelled/archived — immutable. `local_timezone` (IANA) is fixed once the plan leaves draft.
+
+**Target comparison.** `GET /{plan}/nutrition` compares each **day's** current planned nutrition with the **current** EffectiveTargetResolver output by Layer 7C canonical keys, using the Daily Tracker comparison contract (§19), labelled `target_context: "current_target_at_request_time"` — planning assistance, not a future-day target. The whole-plan total is not compared (multi-day). No EffectiveTargetSnapshot is created. No adherence scoring.
+
+**Authorization** (`33_Security_and_Privacy.md` §8.0/§9.1): read — full_management, view_only, pediatric_weight_management; write — full_management, pediatric_weight_management; view_only `403` on writes; revoked/unrelated `404`. Composite `(id, profile_id)` keys and the same-Profile recipe trigger block cross-Profile injection even for an Account managing several Profiles (tested). Pediatric planning adds no formulas, deficits or advice.
+
+**Trust boundary.** As §18: clients submit planning facts only; request schemas declare no snapshot/nutrition field (undeclared fields are stripped); the database refuses snapshots on unconfirmed items and refuses inserting confirmed items. Snapshots are application-authoritative, not cryptographically attested.
+
+**Extension points.** *Layer 8B:* link stable `planned_meal_item.id` ↔ actual `meal_item.id` in a new relation; neither record is rewritten. *Grocery (Layer 9):* current confirmed items expose Food identity + quantity/unit/serving, or `recipe_id` + exact `recipe_version_id` + servings (whose RecipeIngredients carry structured Food/quantity/unit), plus plan dates and the source planned meal/item.
+
+**Deferred.** Narrower confirmation endpoints; editing/moving planned meals and days (insert-only now); planned→actual linkage and adherence (8B+); AI generation/optimization/substitution; historical target snapshots; grocery lists.

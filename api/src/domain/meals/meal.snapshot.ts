@@ -81,9 +81,13 @@ function role(definition: NutrientDefinition): NutrientRole {
   return definition.role ?? 'other';
 }
 
-export function buildFoodSnapshot(calculation: ItemCalculation, source: Extract<SnapshotSource, { type: 'food' }>): MealItemSnapshot {
+export function buildFoodSnapshot(
+  calculation: ItemCalculation,
+  source: Extract<SnapshotSource, { type: 'food' }>,
+  snapshotVersion: string = MEAL_ITEM_SNAPSHOT_VERSION,
+): MealItemSnapshot {
   return {
-    snapshot_version: MEAL_ITEM_SNAPSHOT_VERSION,
+    snapshot_version: snapshotVersion,
     calculation_version: NUTRITION_CALCULATION_VERSION,
     conversion_version: CONVERSION_VERSION,
     source,
@@ -109,11 +113,12 @@ export function buildFoodSnapshot(calculation: ItemCalculation, source: Extract<
 export function buildRecipeSnapshot(
   recipeNutrition: RecipeNutrition,
   source: Extract<SnapshotSource, { type: 'recipe' }>,
+  snapshotVersion: string = MEAL_ITEM_SNAPSHOT_VERSION,
 ): MealItemSnapshot {
   if (!recipeNutrition.per_serving) throw new Error('A recipe item needs a RecipeVersion with a yield.');
   const consumed = multiplyAggregate(recipeNutrition.per_serving, source.servings_consumed);
   return {
-    snapshot_version: MEAL_ITEM_SNAPSHOT_VERSION,
+    snapshot_version: snapshotVersion,
     calculation_version: NUTRITION_CALCULATION_VERSION,
     conversion_version: CONVERSION_VERSION,
     source,

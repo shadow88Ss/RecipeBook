@@ -150,6 +150,14 @@ Per-entity inputs sufficient for RLS policies to be generated deterministically 
 
 This table is the deterministic input set for writing RLS policies in Phase 1 implementation. No RLS policy SQL is authored in this specification pass.
 
+### 8.0 Meal Planning ownership (Phase 2 Layer 8A)
+
+| Entity | Owner | Access | Child-sensitive | Mutation |
+|---|---|---|---|---|
+| MealPlan / MealPlanDay / PlannedMeal / PlannedMealItem | owning Profile (denormalized `profile_id`, composite-FK enforced) | read: full_management, view_only, pediatric_weight_management; write: full_management, pediatric_weight_management | conditional | plan lifecycle by transition only; days/meals insert-only; items editable while draft/planned, immutable once confirmed (replacement only); no DELETE |
+
+Planned-item nutrition snapshots follow the same trust boundary as §8.1: server-computed at confirmation, **application-authoritative, not cryptographically attested**; the API never accepts a client snapshot.
+
 ### 8.1 Consumed nutrition snapshot trust boundary (Phase 2 Layer 7A)
 
 - **Supported write path:** client → `/v1` API → deterministic nutrition engine → user-scoped Supabase/Postgres connection → RLS → `MealItem.nutrition_snapshot`. Official clients must use the API for meal creation, MealItem creation and corrections; they submit consumption facts and must never construct or submit a `nutrition_snapshot` (the API's request schemas do not accept one).
@@ -192,7 +200,10 @@ For the authorized child Profile:
 | UrlSource / ImportJob / RawContent / AiExtraction | No direct access |
 | AuditEvent | No direct access |
 
-### 9.1 Future meal-plan / progress / grocery scope (not implemented yet)
+### 9.1 Future meal-plan / progress / grocery scope (MealPlan implemented in Phase 2 Layer 8A)
+
+**Layer 8A:** the MealPlan part of this scope is now implemented by `20261004120000_meal_planning_core.sql`: on `meal_plan`, `meal_plan_day`, `planned_meal`, `planned_meal_item` — SELECT for `full_management`, `view_only`, `pediatric_weight_management`; INSERT (and UPDATE on `meal_plan`/`planned_meal_item`) for `full_management` and `pediatric_weight_management`; no DELETE for anyone; direct owners resolve to `full_management`; revoked guardians and unrelated Accounts have no access. Nothing outside these four tables was broadened. Pediatric planning plans foods/recipes against existing targets only — no calorie formulas, deficits or advice. Plan adherence, nutrition adherence, goal progress and grocery remain future.
+
 
 When those modules exist, this scope is intended to extend to the authorized child's: MealPlan (read/write), planned meals (read/write), plan adherence (read), nutrition adherence (read), goal progress (read), GroceryList (read/write when related to the child's meal plan), GroceryListItem (read/write). No such table exists in Phase 1 — this is recorded now so the eventual module inherits the right access shape rather than defaulting to `full_management`-equivalent or no access.
 
