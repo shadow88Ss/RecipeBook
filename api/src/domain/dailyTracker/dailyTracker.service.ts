@@ -87,7 +87,7 @@ export class DailyTrackerService {
 
     // Target: current local day only.
     const resolvedTarget = isCurrentDay ? await this.targets.resolve(auth, profileId) : null;
-    const { mapped, unmapped } = resolvedTarget ? mapTargets(resolvedTarget.resolved, vocabulary) : { mapped: [], unmapped: [] };
+    const { mapped, unmapped } = resolvedTarget ? mapTargets(resolvedTarget.resolved, resolvedTarget.unresolved_fields, vocabulary) : { mapped: [], unmapped: [] };
     const actualById = new Map(actual.map((a) => [a.nutrient.id, a]));
 
     return {
@@ -122,7 +122,7 @@ export class DailyTrackerService {
         nutrients: mapped
           .map((t) => compareToTarget(actualById.get(t.nutrient.id), t))
           .sort((a, b) => (a.nutrient_key < b.nutrient_key ? -1 : a.nutrient_key > b.nutrient_key ? 1 : 0)),
-        unmapped_targets: unmapped.map((u) => ({ field_name: u.field_name, value: u.resolved.value, unit: u.resolved.unit, source: u.resolved.source, reason: u.reason })),
+        unmapped_targets: unmapped,
       },
       meal_groups: MEAL_TYPES.flatMap((mealType) => {
         const meals = logs.filter((l) => l.meal_type === mealType);

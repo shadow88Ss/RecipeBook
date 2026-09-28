@@ -80,14 +80,14 @@ Per the approved design, this is **not** a continuously synchronized table. `Eff
 The resolver's output shape, per profile and per request, is:
 
 - `profile_id`
-- one entry per resolved field (e.g. `calories`, `protein_g`, `fiber_g`, ...), each carrying:
+- one entry per resolved field, keyed by canonical target key (Layer 7C: the Layer 5C nutrient key, e.g. `energy`, `protein`, `fiber`, `iron`; value in its reporting unit), each carrying:
   - `value`
   - `source`: `safety_rule | clinician_target | user_target | profile_derived`
   - `source_reference` (id of the contributing `ClinicianTarget`/`NutritionTarget`/`Goal` row, where applicable)
 - `resolver_version` — the version of the resolution logic that produced this output.
 - `resolved_at` — timestamp of computation.
 
-This shape is not persisted by default. It is computed fresh on every read.
+This shape is not persisted by default. It is computed fresh on every read. Since Layer 7C the resolver also returns `unresolved_fields` — active target rows it could not interpret (pre-canonical names, incompatible units, conflicting rows) — rather than guessing (`30_API.md` §20).
 
 ### 4.2 Effective Target Snapshot (new entity: `EffectiveTargetSnapshot`)
 

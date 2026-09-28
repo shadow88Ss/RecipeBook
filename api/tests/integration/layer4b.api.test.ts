@@ -177,7 +177,9 @@ describe('H/I/J/K: NutritionTarget', () => {
     expect(second.status).toBe(201);
 
     const active = await request(app).get(`/v1/profiles/${SEED.profileA}/nutrition-targets`).set('Authorization', account);
-    const activeForField = active.body.data.filter((r: { field_name: string }) => r.field_name === field);
+    // Layer 7C: submitted as the alias "potassium_mg", stored under the canonical key.
+    expect(second.body).toMatchObject({ field_name: 'potassium', unit: 'mg' });
+    const activeForField = active.body.data.filter((r: { field_name: string }) => r.field_name === 'potassium');
     // K: never more than one active row for this field, even having just
     // created two rows for it back to back.
     expect(activeForField).toHaveLength(1);
@@ -229,7 +231,7 @@ describe('L/M/N: ClinicianTarget', () => {
     const res = await request(app)
       .post(`/v1/profiles/${SEED.profileChild}/clinician-targets`)
       .set('Authorization', asAccount(SEED.accountFullManagement))
-      .send({ field_name: 'calcium_target_mg', value: 1300, unit: 'mg' });
+      .send({ field_name: 'calcium', value: 1300, unit: 'mg' });
     expect(res.body.source_type).toBe('guardian_entered');
   });
 
@@ -320,25 +322,27 @@ describe('O/P/Q: WeightMeasurement', () => {
 describe('R/S/T/U: EffectiveTargetResolver', () => {
   it('R/S/T: clinician precedence wins field-by-field, with provenance, over the user target', async () => {
     const account = asAccount(SEED.accountA);
-    await request(app).post(`/v1/profiles/${SEED.profileA}/nutrition-targets`).set('Authorization', account).send({ field_name: 'resolver_calories', value: 1800, unit: 'kcal' });
-    await request(app).post(`/v1/profiles/${SEED.profileA}/nutrition-targets`).set('Authorization', account).send({ field_name: 'resolver_fiber_g', value: 22, unit: 'g' });
+    // Layer 7C: aliases in, canonical keys out ("calories" -> energy, "fiber_g" -> fiber).
+    await request(app).post(`/v1/profiles/${SEED.profileA}/nutrition-targets`).set('Authorization', account).send({ field_name: 'calories', value: 1800, unit: 'kcal' });
+    await request(app).post(`/v1/profiles/${SEED.profileA}/nutrition-targets`).set('Authorization', account).send({ field_name: 'fiber_g', value: 22, unit: 'g' });
     const clinician = await request(app)
       .post(`/v1/profiles/${SEED.profileA}/clinician-targets`)
       .set('Authorization', account)
-      .send({ field_name: 'resolver_calories', value: 2100, unit: 'kcal' });
+      .send({ field_name: 'energy', value: 2100, unit: 'kcal' });
 
     const res = await request(app).get(`/v1/profiles/${SEED.profileA}/effective-target`).set('Authorization', account);
     expect(res.status).toBe(200);
-    expect(res.body.resolved.resolver_calories).toEqual({
+    expect(res.body.resolved).not.toHaveProperty('calories');
+    expect(res.body.resolved.energy).toEqual({
       value: 2100,
       unit: 'kcal',
       source: 'clinician_target',
       source_reference: clinician.body.id,
     });
     // S: a DIFFERENT field with no clinician override still resolves from
-    // the user target, independently of resolver_calories's resolution.
-    expect(res.body.resolved.resolver_fiber_g.source).toBe('user_target');
-    expect(res.body.resolved.resolver_fiber_g.value).toBe(22);
+    // the user target, independently of energy's resolution.
+    expect(res.body.resolved.fiber.source).toBe('user_target');
+    expect(res.body.resolved.fiber.value).toBe(22);
     expect(res.body.resolver_version).toBeTruthy();
     expect(res.body.resolved_at).toBeTruthy();
   });
@@ -424,7 +428,7 @@ describe('Y: pediatric_weight_management performs only its approved writes', () 
     const nutritionTarget = await request(app)
       .post(`/v1/profiles/${SEED.profileChild}/nutrition-targets`)
       .set('Authorization', account)
-      .send({ field_name: 'pediatric_fiber_g', value: 18, unit: 'g' });
+      .send({ field_name: 'fiber', value: 18, unit: 'g' });
     expect(nutritionTarget.status).toBe(201);
     const measurement = await request(app)
       .post(`/v1/profiles/${SEED.profileChild}/weight-measurements`)

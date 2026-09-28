@@ -176,21 +176,20 @@ describe('M-U: effective targets (current day)', () => {
       { field_name: 'fiber', value: 1, unit: 'g' }, // partial actual already above target
       { field_name: 'iron', value: 0.008, unit: 'g' }, // 8 mg, converted exactly
       { field_name: 'calcium', value: 1000, unit: 'mg' }, // actual unavailable
-      { field_name: 'calories', value: 2000, unit: 'kcal' }, // not an approved field name
-      { field_name: 'carbohydrate', value: 250, unit: 'kcal' }, // incompatible unit
+      { field_name: 'calories', value: 2000, unit: 'kcal' }, // Layer 7C alias -> energy (supersedes energy_kcal)
     ]) {
       expect((await A().post(`/v1/profiles/${SEED.profileA}/nutrition-targets`, body)).status).toBe(201);
     }
+    // Layer 7C: an incompatible unit is now refused at write time
+    expect((await A().post(`/v1/profiles/${SEED.profileA}/nutrition-targets`, { field_name: 'carbohydrate', value: 250, unit: 'kcal' })).status).toBe(400);
     const res = await tracker(SEED.accountA, SEED.profileA, TODAY);
     expect(cmp(res.body, 'energy')).toMatchObject({ comparison_status: 'undetermined', remaining: null, remaining_at_most: 1725.5, over_target_by: null });
     expect(cmp(res.body, 'fiber')).toMatchObject({ comparison_status: 'above_target', remaining: 0, over_target_by: null });
     expect(cmp(res.body, 'fiber')?.over_target_by_at_least).toBeGreaterThan(0);
     expect(cmp(res.body, 'iron')).toMatchObject({ comparison_status: 'undetermined', target: { value: 8 }, remaining: null, remaining_at_most: 5.525 });
     expect(cmp(res.body, 'calcium')).toMatchObject({ comparison_status: 'actual_unavailable', remaining: null, remaining_at_most: null, over_target_by: null });
-    expect(res.body.comparison.unmapped_targets).toEqual([
-      expect.objectContaining({ field_name: 'calories', reason: 'unknown_field' }),
-      expect.objectContaining({ field_name: 'carbohydrate', reason: 'incompatible_unit' }),
-    ]);
+    expect(res.body.comparison.unmapped_targets).toEqual([]);
+    expect(res.body.target.fields.map((f: { field_name: string }) => f.field_name)).toEqual(['calcium', 'energy', 'fiber', 'iron', 'protein']);
     // provenance names the source of every resolved field; no account ids
     expect(res.body.target.fields.every((f: { source: string }) => ['user_target', 'clinician_target'].includes(f.source))).toBe(true);
   });

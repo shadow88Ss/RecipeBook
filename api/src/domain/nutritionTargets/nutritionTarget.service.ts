@@ -19,6 +19,7 @@ import { requireProfileScope } from '../../lib/authorize';
 import { paginateInMemory, type Page, type PaginationQuery } from '../../lib/pagination';
 import type { ScopedDbFactory } from '../../lib/scopedDb';
 import type { AuthContext } from '../../types/express';
+import { canonicalTargetOrThrow, historyFieldNames } from './targetVocabulary';
 import { NUTRITION_TARGET_COLUMNS, toNutritionTargetDto, type NutritionTargetRow } from './nutritionTarget.dto';
 import type { NutritionTargetCreateInput, NutritionTargetDto, NutritionTargetHistoryQuery } from './nutritionTarget.schemas';
 
@@ -51,10 +52,13 @@ export class NutritionTargetService {
     const db = this.dbFactory.forUser(auth);
     await requireProfileScope(db, profileId, READ_SCOPES);
     const eq: Record<string, string | boolean> = { profile_id: profileId };
-    if (query.field_name) eq.field_name = query.field_name;
+    // Layer 7C: an alias or canonical key selects every stored name of that
+    // key, so history written before canonical keys stays reachable.
+    const names = query.field_name ? historyFieldNames(query.field_name) : undefined;
     const rows = await db.select<NutritionTargetRow>('nutrition_target', {
       columns: NUTRITION_TARGET_COLUMNS,
       eq,
+      ...(names ? { in: { field_name: names } } : {}),
       order: { column: 'created_at', ascending: false },
       limit: FETCH_CAP,
     });
@@ -68,9 +72,12 @@ export class NutritionTargetService {
   async create(auth: AuthContext, profileId: string, input: NutritionTargetCreateInput): Promise<NutritionTargetDto> {
     const db = this.dbFactory.forUser(auth);
     await requireProfileScope(db, profileId, WRITE_SCOPES);
+    // Layer 7C: stored under the canonical key and reporting unit only
+    // (aliases and compatible units normalized; anything else is a 400).
+    const target = canonicalTargetOrThrow(input);
     const row = await db.insert<NutritionTargetRow>(
       'nutrition_target',
-      { profile_id: profileId, field_name: input.field_name, value: input.value, unit: input.unit },
+      { profile_id: profileId, field_name: target.field_name, value: target.value, unit: target.unit },
       NUTRITION_TARGET_COLUMNS,
     );
     return toNutritionTargetDto(row);

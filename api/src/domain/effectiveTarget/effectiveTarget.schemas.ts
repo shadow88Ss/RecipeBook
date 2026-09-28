@@ -22,9 +22,20 @@ export const resolvedFieldSchema = z.object({
 });
 export type ResolvedField = z.infer<typeof resolvedFieldSchema>;
 
+/** Layer 7C — an active target row the resolver could not use, and why. */
+export const unresolvedTargetFieldSchema = z.object({
+  field_name: z.string(),
+  source: z.enum(['clinician_target', 'user_target']),
+  source_reference: z.uuid(),
+  reason: z.enum(['unknown_target_key', 'incompatible_unit', 'invalid_value', 'conflicting_rows']),
+});
+export type UnresolvedTargetField = z.infer<typeof unresolvedTargetFieldSchema>;
+
 export const effectiveTargetResponseSchema = z.object({
   profile_id: z.uuid(),
+  /** Keyed by canonical target key (Layer 7C), values in its reporting unit. */
   resolved: z.record(z.string(), resolvedFieldSchema),
+  unresolved_fields: z.array(unresolvedTargetFieldSchema),
   resolver_version: z.string(),
   resolved_at: z.iso.datetime({ offset: true }),
   implemented_sources: z.array(resolvedFieldSourceSchema),

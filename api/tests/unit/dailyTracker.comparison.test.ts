@@ -30,46 +30,33 @@ const actual = (key: string, value: string | null, coverage: AggregateNutrient['
   missing: [],
 });
 const target = (key: string, value: number, unit: string) => {
-  const { mapped } = mapTargets({ [key]: field(value, unit) }, VOCAB);
+  const { mapped } = mapTargets({ [key]: field(value, unit) }, [], VOCAB);
   const t = mapped[0];
   if (!t) throw new Error('not mapped');
   return t;
 };
 
-describe('mapTargets: explicit, exact mapping only', () => {
-  it('maps canonical keys (with exact g/mg/mcg conversion) and Layer 5C summary fields', () => {
-    const { mapped, unmapped } = mapTargets(
-      { protein: field(110, 'g'), energy_kcal: field(2000, 'kcal'), iron: field(0.018, 'g'), vitamin_d: field(0.015, 'mg') },
-      VOCAB,
-    );
+describe('mapTargets: canonical resolver keys only (Layer 7C)', () => {
+  it('maps canonical keys to the same nutrient, converting compatible units exactly', () => {
+    const { mapped, unmapped } = mapTargets({ protein: field(110, 'g'), energy: field(2000, 'kcal'), iron: field(8, 'mg'), vitamin_d: field(0.015, 'mg') }, [], VOCAB);
     expect(unmapped).toEqual([]);
     const byKey = Object.fromEntries(mapped.map((m) => [m.nutrient.canonical_key, m]));
-    expect(byKey.energy?.field_name).toBe('energy_kcal');
-    expect(compareToTarget(undefined, byKey.iron as never).target.value).toBe(18); // 0.018 g -> 18 mg
-    expect(compareToTarget(undefined, byKey.vitamin_d as never).target.value).toBe(15); // 0.015 mg -> 15 mcg
+    expect(Object.keys(byKey).sort()).toEqual(['energy', 'iron', 'protein', 'vitamin_d']);
+    expect(compareToTarget(undefined, byKey.vitamin_d as never).target.value).toBe(15); // defensive mg -> mcg
   });
 
-  it('never guesses: unknown names, incompatible units, alias unit mismatch, duplicates and invalid values are unmapped', () => {
+  it('never compares an alias-shaped key, an incompatible unit, or a row the resolver could not use', () => {
     const { mapped, unmapped } = mapTargets(
-      {
-        calories: field(2000, 'kcal'), // not an approved key or summary field
-        carbohydrate: field(300, 'kcal'), // g <-> kcal never converted
-        energy_kcal: field(8000, 'kJ'), // alias bound to kcal
-        fat: field(70, 'g'),
-        fat_g: field(65, 'g'), // two targets for one nutrient
-        iron: field(-1, 'mg'),
-      },
+      { calories: field(2000, 'kcal'), carbohydrate: field(300, 'kcal') },
+      [{ field_name: 'resolver_calories', source: 'user_target', source_reference: '00000000-0000-4000-8000-000000000002', reason: 'unknown_target_key' }],
       VOCAB,
     );
     expect(mapped).toEqual([]);
-    expect(Object.fromEntries(unmapped.map((u) => [u.field_name, u.reason]))).toEqual({
-      calories: 'unknown_field',
-      carbohydrate: 'incompatible_unit',
-      energy_kcal: 'incompatible_unit',
-      fat: 'duplicate_target_for_nutrient',
-      fat_g: 'duplicate_target_for_nutrient',
-      iron: 'invalid_value',
-    });
+    expect(unmapped.map((u) => [u.field_name, u.reason])).toEqual([
+      ['resolver_calories', 'unknown_target_key'],
+      ['calories', 'unknown_target_key'], // the resolver would have returned "energy"
+      ['carbohydrate', 'incompatible_unit'],
+    ]);
   });
 });
 

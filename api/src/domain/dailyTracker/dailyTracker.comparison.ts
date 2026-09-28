@@ -1,15 +1,11 @@
 // Layer 7B — actual-vs-target comparison. Pure; measurement only.
 //
-// Targets come from the single EffectiveTargetResolver (never re-derived
-// here). A resolved target field is compared with a nutrient only when the
-// mapping is explicit and exact:
-//   field_name = a canonical nutrient key (Layer 5C vocabulary: "protein",
-//                "iron", ...) and the target unit converts exactly to the
-//                nutrient's reporting unit (g/mg/mcg only; kcal only kcal), or
-//   field_name = a Layer 5C summary field ("protein_g", "energy_kcal", ...)
-//                and the target unit is exactly that field's unit.
-// Anything else ("calories", "kJ", a typo) is returned as an unmapped
-// target and never compared — no name guessing, no unit guessing.
+// Targets come from the single EffectiveTargetResolver, which (Layer 7C)
+// returns them keyed by canonical target key — the Layer 5C nutrient key —
+// in that nutrient's reporting unit. The tracker therefore maps a target to
+// the nutrient with the same key, re-checking the unit defensively; rows the
+// resolver could not interpret arrive as its `unresolved_fields` and are
+// passed through as unmapped targets, never compared.
 //
 // Comparison contract (one per mapped nutrient):
 //   actual complete, target T, actual A:
@@ -28,8 +24,7 @@
 import { add, isZero, roundHalfUp, fromNumber, type Rational } from '../conversion/decimal';
 import { roundValue, NUTRITION_DECIMAL_PLACES, type AggregateNutrient, type NutrientDefinition } from '../nutrition/nutrition.engine';
 import { convertNutrientAmount } from '../nutrition/nutrientUnits';
-import { SUMMARY_FIELDS } from '../nutrition/nutritionSummary';
-import type { ResolvedField } from '../effectiveTarget/effectiveTarget.schemas';
+import type { ResolvedField, UnresolvedTargetField } from '../effectiveTarget/effectiveTarget.schemas';
 
 export type ComparisonStatus = 'below_target' | 'at_target' | 'above_target' | 'at_or_above_target' | 'undetermined' | 'actual_unavailable';
 
@@ -41,11 +36,13 @@ export interface MappedTarget {
   resolved: ResolvedField;
 }
 
-export type UnmappedReason = 'unknown_field' | 'incompatible_unit' | 'invalid_value' | 'duplicate_target_for_nutrient';
+export type UnmappedReason = UnresolvedTargetField['reason'];
 
 export interface UnmappedTarget {
   field_name: string;
-  resolved: ResolvedField;
+  value: number | null;
+  unit: string | null;
+  source: ResolvedField['source'];
   reason: UnmappedReason;
 }
 
@@ -63,44 +60,24 @@ function subtract(a: Rational, b: Rational): Rational {
   return add(a, negate(b));
 }
 
-/** Maps resolved target fields onto nutrients (see file header). */
+/** Maps the resolver's canonical target keys onto nutrients. */
 export function mapTargets(
   resolved: Record<string, ResolvedField>,
+  unresolved: readonly UnresolvedTargetField[],
   vocabulary: readonly NutrientDefinition[],
 ): { mapped: MappedTarget[]; unmapped: UnmappedTarget[] } {
   const byKey = new Map(vocabulary.map((n) => [n.canonical_key, n]));
-  const aliases = new Map<string, { key: string; unit: string }>(SUMMARY_FIELDS.map((f) => [f.field, { key: f.key, unit: f.unit }]));
-  const candidates: MappedTarget[] = [];
-  const unmapped: UnmappedTarget[] = [];
+  const mapped: MappedTarget[] = [];
+  const unmapped: UnmappedTarget[] = unresolved.map((u) => ({ field_name: u.field_name, value: null, unit: null, source: u.source, reason: u.reason }));
 
   for (const [field_name, field] of Object.entries(resolved).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
-    const alias = aliases.get(field_name);
-    const nutrient = byKey.get(alias?.key ?? field_name);
-    if (!nutrient) {
-      unmapped.push({ field_name, resolved: field, reason: 'unknown_field' });
+    const nutrient = byKey.get(field_name);
+    const converted = nutrient && Number.isFinite(field.value) && field.value > 0 ? convertNutrientAmount(fromNumber(field.value), field.unit, nutrient.unit) : null;
+    if (!nutrient || converted === null) {
+      unmapped.push({ field_name, value: field.value, unit: field.unit, source: field.source, reason: nutrient ? 'incompatible_unit' : 'unknown_target_key' });
       continue;
     }
-    if (!Number.isFinite(field.value) || field.value < 0) {
-      unmapped.push({ field_name, resolved: field, reason: 'invalid_value' });
-      continue;
-    }
-    const converted =
-      alias && field.unit !== alias.unit ? null : convertNutrientAmount(fromNumber(field.value), field.unit, nutrient.unit);
-    if (converted === null) {
-      unmapped.push({ field_name, resolved: field, reason: 'incompatible_unit' });
-      continue;
-    }
-    candidates.push({ field_name, nutrient, value: converted, resolved: field });
-  }
-
-  // Two target fields for one nutrient (e.g. "protein" and "protein_g")
-  // are ambiguous: neither is compared.
-  const counts = new Map<string, number>();
-  for (const c of candidates) counts.set(c.nutrient.id, (counts.get(c.nutrient.id) ?? 0) + 1);
-  const mapped: MappedTarget[] = [];
-  for (const c of candidates) {
-    if ((counts.get(c.nutrient.id) ?? 0) > 1) unmapped.push({ field_name: c.field_name, resolved: c.resolved, reason: 'duplicate_target_for_nutrient' });
-    else mapped.push(c);
+    mapped.push({ field_name, nutrient, value: converted, resolved: field });
   }
   return { mapped, unmapped };
 }

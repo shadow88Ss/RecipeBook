@@ -169,9 +169,9 @@ Constraint: at most one active (`revoked_at IS NULL`) row per `(guardian_account
 |---|---|---|---|---|---|---|---|---|
 | id | uuid | not null | — | PK | system_computed | — | no | — |
 | profile_id | uuid | not null | — | FK → Profile | system_computed | — | no | index |
-| field_name | text | not null | — | — | system_computed | must be in the fixed resolvable-field vocabulary (e.g. `calories`, `protein_g`, `fiber_g`, ...) | no | shared vocabulary with `ClinicianTarget.field_name` |
+| field_name | text | not null | — | — | system_computed | a canonical target key = a Layer 5C `nutrient.canonical_key` (`energy`, `protein`, `fiber`, `iron`, ...) for rows written since Layer 7C (`enforce_canonical_target`); input aliases (`calories`, `protein_g`, `carbs`, ...) are normalized by the API, never stored | no | shared vocabulary with `ClinicianTarget.field_name`; pre-7C rows keep their stored name and are interpreted/reported by the resolver (`30_API.md` §20) |
 | value | numeric | not null | — | — | user_entered | plausible range per field | yes | — |
-| unit | text | not null | — | — | user_entered | must match field's canonical unit | yes | — |
+| unit | text | not null | — | — | user_entered | the key's reporting unit exactly (kcal / g / mg / mcg); the API converts compatible mass units exactly and rejects kJ, IU and mass↔energy | yes | Layer 7C |
 | is_active | boolean | not null | true | — | system_computed | — | no (managed by supersede pattern) | — |
 | superseded_at | timestamp | nullable | null | — | system_computed | — | no | set when a newer row for the same field is created; old row retained for history |
 | created_at / updated_at | timestamp | not null | now() | — | system_computed | — | no | — |
@@ -190,9 +190,9 @@ Constraint: at most one row with `is_active = true` per `(profile_id, field_name
 |---|---|---|---|---|---|---|---|---|
 | id | uuid | not null | — | PK | system_computed | — | no | — |
 | profile_id | uuid | not null | — | FK → Profile | system_computed | — | no | index |
-| field_name | text | not null | — | — | system_computed | shared vocabulary with `NutritionTarget.field_name` | no | — |
+| field_name | text | not null | — | — | system_computed | shared vocabulary with `NutritionTarget.field_name`: canonical target key only for rows since Layer 7C | no | — |
 | value | numeric | not null | — | — | guardian_entered / user_entered | plausible/safety-bounded range | yes | — |
-| unit | text | not null | — | — | guardian_entered / user_entered | must match canonical unit | yes | — |
+| unit | text | not null | — | — | guardian_entered / user_entered | the key's reporting unit exactly (Layer 7C) | yes | — |
 | source_type | enum(`guardian_entered`,`user_entered`,`clinician_integration`) | not null | — | — | system_computed | `clinician_integration` reserved, unused in Phase 1 | no | — |
 | verification_status | enum(`unverified`,`platform_verified`) | not null | `unverified` | — | system_computed | never set to `platform_verified` without an approved verified-integration workflow | no | UI must not imply verification that didn't happen (Master §9) |
 | provided_by_account_id | uuid | not null | — | FK → Account | system_computed | — | no | — |

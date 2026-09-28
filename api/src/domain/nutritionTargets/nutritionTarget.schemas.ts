@@ -19,7 +19,7 @@ import { z } from 'zod';
 
 export const fieldNameSchema = z
   .string()
-  .regex(/^[a-z][a-z0-9_]{0,63}$/, 'field_name must be a lowercase snake_case identifier (e.g. "calories", "protein_g").');
+  .regex(/^[a-z][a-z0-9_]{0,63}$/, 'field_name must be a canonical target key (e.g. "energy", "protein", "iron") or an accepted alias.');
 
 const valueSchema = z.number().finite().positive().max(100_000);
 const unitSchema = z.string().trim().min(1).max(32);
