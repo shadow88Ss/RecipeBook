@@ -150,6 +150,13 @@ Per-entity inputs sufficient for RLS policies to be generated deterministically 
 
 This table is the deterministic input set for writing RLS policies in Phase 1 implementation. No RLS policy SQL is authored in this specification pass.
 
+### 8.1 Consumed nutrition snapshot trust boundary (Phase 2 Layer 7A)
+
+- **Supported write path:** client → `/v1` API → deterministic nutrition engine → user-scoped Supabase/Postgres connection → RLS → `MealItem.nutrition_snapshot`. Official clients must use the API for meal creation, MealItem creation and corrections; they submit consumption facts and must never construct or submit a `nutrition_snapshot` (the API's request schemas do not accept one).
+- **Guarantee:** snapshots are **application-authoritative** historical records computed by the server engine — **not cryptographically attested**.
+- **Known limitation:** the API and a direct Supabase client use the same user-scoped database identity, so an Account with legitimate write permission to a Profile could bypass the API and store a fabricated (correctly shaped) snapshot for **that Profile only**. Still enforced by the database regardless of path: Profile/Account isolation (RLS), consumed-row immutability (including snapshots), correction-chain integrity and its AuditEvent, the Food/Recipe and same-Profile recipe invariants, the local-day rule, and the read-only status of global reference data.
+- **Future hardening (not implemented):** server-signed snapshots verified in the database (signing key with key id, Vault-style secret storage, pgcrypto, canonical serialization, rotation, optional nonce). Requires a separate architecture/security review; no design is committed.
+
 ---
 
 ## 9. `pediatric_weight_management` Access Matrix

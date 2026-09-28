@@ -555,6 +555,68 @@ describe('AA-AE: authorization follows the existing meal RLS', () => {
   });
 });
 
+describe('Trust boundary: clients submit consumption facts, never nutrition', () => {
+  const forged = {
+    snapshot_version: 'forged',
+    source: { type: 'food', food_id: F.rice },
+    nutrients: [{ nutrient_id: NUT.protein, nutrient_key: 'protein', unit: 'g', coverage: 'complete', status: 'resolved', value_exact: '999/1' }],
+    provenance: { forged: true },
+  };
+  const storedSnapshot = async (id: string) =>
+    (await pool.query('select nutrition_snapshot, nutrition_calculation_version from meal_item where id = $1', [id])).rows[0];
+
+  it('A/C/D: POST /meals ignores a client-supplied nutrition_snapshot (item and request level); the server computes it', async () => {
+    const res = await A().post(mealsOf(SEED.profileA), {
+      meal_type: 'lunch',
+      ...DAY,
+      consumed_at: AT,
+      nutrition_snapshot: forged,
+      items: [{ ...riceItem(150), nutrition_snapshot: forged, nutrition_calculation_version: 'forged', nutrition: { protein_g: 999 }, status: 'draft' }],
+    });
+    expect(res.status).toBe(201);
+    const item = res.body.items[0];
+    expect(item.status).toBe('consumed');
+    expect(item.nutrition.summary.protein_g.value).toBe(4.05); // 150 g rice, not 999
+    const stored = await storedSnapshot(item.id);
+    expect(stored.nutrition_calculation_version).toBe('nutrition-calculation-5b.1');
+    expect(stored.nutrition_snapshot.snapshot_version).toBe('meal-item-snapshot-7a.1');
+    expect(JSON.stringify(stored.nutrition_snapshot)).not.toMatch(/forged|999\/1/);
+  });
+
+  it('A/C/D: POST /meals/{id}/items ignores a client-supplied snapshot', async () => {
+    const meal = await A().post(mealsOf(SEED.profileA), { meal_type: 'lunch', ...DAY });
+    const res = await A().post(`${mealsOf(SEED.profileA)}/${meal.body.id}/items`, {
+      consumed_at: AT,
+      nutrition_snapshot: forged,
+      items: [{ type: 'recipe', recipe_id: recipeId, recipe_version_id: recipeV1, servings: 1, nutrition_snapshot: forged }],
+    });
+    expect(res.status).toBe(201);
+    const stored = await storedSnapshot(res.body.items[0].id);
+    expect(stored.nutrition_snapshot.source).toMatchObject({ type: 'recipe', recipe_version_id: recipeV1 });
+    expect(JSON.stringify(stored.nutrition_snapshot)).not.toMatch(/forged|999\/1/);
+  });
+
+  it('B/C/D: a correction accepts corrected facts only; its snapshot is computed by the server', async () => {
+    const meal = await A().post(mealsOf(SEED.profileA), { meal_type: 'dinner', ...DAY, consumed_at: AT, items: [riceItem(150)] });
+    const res = await A().post(`${mealsOf(SEED.profileA)}/${meal.body.id}/items/${meal.body.items[0].id}/correct`, {
+      correction_reason: 'weighed again',
+      nutrition_snapshot: forged,
+      item: { ...riceItem(120), nutrition_snapshot: forged, nutrition_calculation_version: 'forged' },
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.nutrition.summary.protein_g.value).toBe(3.24); // 120 g rice
+    const stored = await storedSnapshot(res.body.id);
+    expect(stored.nutrition_calculation_version).toBe('nutrition-calculation-5b.1');
+    expect(JSON.stringify(stored.nutrition_snapshot)).not.toMatch(/forged|999\/1/);
+
+    // E: once written, the snapshot cannot be replaced — directly or during supersession
+    await expect(asAccountSql(SEED.accountA, "update meal_item set nutrition_snapshot = $1 where id = $2", [forged, res.body.id])).rejects.toThrow(/consumed items are immutable/);
+    // F: another Account cannot reach it at all
+    expect((await as(SEED.accountB).get(`${mealsOf(SEED.profileA)}/${meal.body.id}/items/${res.body.id}`)).status).toBe(404);
+    expect((await asAccountSql(SEED.accountB, 'select id from meal_item where id = $1', [res.body.id])).rows).toEqual([]);
+  });
+});
+
 describe('AF: meal history pagination', () => {
   it('paginates with the shared cursor convention and filters by local date', async () => {
     const b = as(SEED.accountB);

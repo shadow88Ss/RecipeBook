@@ -755,6 +755,8 @@ It must not become the sole authority for:
 
 Critical rules must be enforceable server-side.
 
+Consumed-meal writes (Phase 2 Layer 7A): official clients create meals, meal items and corrections only through the `/v1` API and submit consumption facts (Food or exact RecipeVersion, quantity, unit/serving, `consumed_at`, meal context) — never nutrition values and never a `nutrition_snapshot`. The API's deterministic engine computes the historical nutrition snapshot. The resulting guarantee is *application-authoritative*, not cryptographically attested (`30_API.md` §18, `33_Security_and_Privacy.md` §10).
+
 ---
 
 # 23. Offline and Caching Philosophy

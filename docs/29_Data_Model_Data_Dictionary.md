@@ -291,7 +291,7 @@ Index: `(profile_id, logged_date)`. Unique `(id, profile_id)` (target of MealIte
 | corrects_meal_item_id | uuid | nullable | null | self-FK → MealItem | system_computed | only settable when creating a correction row for a `consumed` item | no | — |
 | superseded_by_meal_item_id | uuid | nullable | null | self-FK → MealItem | system_computed | set on the original when a correction is created | no | — |
 | correction_reason | text | nullable | null | — | user_entered | required if `corrects_meal_item_id` set | at correction time only | — |
-| nutrition_snapshot | jsonb | required when consumed | null | — | system_computed | `meal-item-snapshot-7a.1`: source, exact per-nutrient values + coverage, Layer 5B/6A provenance, rule versions | no — immutable once consumed | Layer 7A. The nutrition recorded at logging time; history is read only from it |
+| nutrition_snapshot | jsonb | required when consumed | null | — | system_computed | `meal-item-snapshot-7a.1`: source, exact per-nutrient values + coverage, Layer 5B/6A provenance, rule versions | no — immutable once consumed; never client-supplied (API computes it) | Layer 7A. The nutrition recorded at logging time; history is read only from it. **Application-authoritative, not cryptographically attested** — see `33_Security_and_Privacy.md` §8.1 |
 | nutrition_calculation_version | text | required when consumed | null | — | system_computed | e.g. `nutrition-calculation-5b.1` | no | Layer 7A |
 | nutrition_calculated_at | timestamp | required when consumed | null | — | system_computed | — | no | Layer 7A |
 | created_at / updated_at | timestamp | not null | now() | — | system_computed | — | no | items logged together get strictly increasing `created_at` (logging order) |
