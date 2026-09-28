@@ -63,6 +63,8 @@ No transition may move a `consumed` item back to `draft`, `planned`, or `confirm
   - the correction action is also written to `AuditEvent` (actor, timestamp, before/after reference).
   A consumed item is never destructively edited; every correction is additive and traceable.
 
+**Layer 7A (implemented).** Direct actual-consumption logging inserts items as `consumed` (with a server-calculated immutable nutrition snapshot) rather than walking `draft → planned → confirmed`; that path remains for planning. The correction above is one atomic operation (`correct_meal_item()`), and the AuditEvent is written by a database trigger on the supersession (see `30_API.md` §18). Removing/voiding a consumed item without a replacement is deferred.
+
 ### 3.4 Optimizer eligibility (data-model consequence)
 
 Automatic optimizer/coach write access to `MealItem.status`-derived fields is limited to `draft` and `planned` states. Any service or AI agent writing to a `MealItem` must check `status` before applying an automatic change; this is a data-layer invariant, not only an application-layer convention, and should be enforced by a check/trigger where the target platform (Postgres) supports it.
@@ -331,6 +333,8 @@ This table is not fully populated in this document; producing it is the immediat
 - `UrlSource` — `canonical_url`, `original_url`, `source_provider`, `first_seen_at`, `last_checked_at`, `latest_content_fingerprint` (finalized per §7.2; `UrlSource 1 → N ImportJob`).
 - `RawContent` — `import_job_id` (required), `url_source_id` (denormalized).
 - `RecipeVersion` — `origin_url_source_id`, `origin_import_job_id` (both nullable).
+- `MealLog` — `local_timezone` (IANA), `notes` (Phase 2 Layer 7A).
+- `MealItem` — `unit`, `nutrition_snapshot`, `nutrition_calculation_version`, `nutrition_calculated_at`; Food-vs-Recipe invariant; `(meal_log_id, profile_id)` FK; same-Profile recipe rule (Phase 2 Layer 7A).
 - `RecipeIngredient` — `food_serving_id` (nullable; must belong to the ingredient's Food; exclusive with `unit`) (Phase 2 Layer 6A). `Recipe.current_version_id` must reference a version of the same Recipe (trigger), and a new version with its ingredients/instructions is written atomically by `create_recipe_version()` (SECURITY INVOKER, existing RLS).
 
 ## 15. Full Field-Level Data Dictionary

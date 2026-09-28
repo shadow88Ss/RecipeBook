@@ -225,7 +225,7 @@ Every nutrient in the `Nutrient` vocabulary appears, per item and in the aggrega
 
 **Pipeline** (per item): input → normalize the quantity to its own canonical base (`g`/`ml`) with the Layer 5A engine → for each nutrient, resolve the one authoritative FoodNutrient record → read **its** explicit `basis_quantity`/`basis_unit` (never assume per 100 g) → convert the input into `basis_unit` with the Layer 5A engine (mass ↔ volume only via stored trusted density) → `value = amount × quantity_in_basis_unit ÷ basis_quantity` → aggregate across items → round once at the output. The engine reuses Layer 5A's `convertExact` (the unrounded form of `convert`), so no conversion logic is duplicated and no converted quantity is rounded before scaling. Servings carry no nutrition of their own: `2 × (1 slice = 30 g)` → 60 g → scaled from the nutrient basis.
 
-**Nutrient statuses.** `resolved` (value present; may be exactly 0), `no_data` (no FoodNutrient record), `not_authoritative` (only `ai_matched`/`user_entered` records), `ambiguous_nutrient_source`, `basis_unreconcilable` (e.g. volume input vs per-100 g basis without density; `conversion_reason` says why), `non_authoritative_quantity` (the only path to the basis uses an `ai_matched` serving weight or density), `quantity_unresolved`, and (Layer 6A, recipe aggregates only) `item_unresolved` — the item never reached the engine, e.g. an unmatched recipe ingredient (§17). Only `resolved` carries a value; every other status has `value: null`, never 0.
+**Nutrient statuses.** `resolved` (value present; may be exactly 0), `no_data` (no FoodNutrient record), `not_authoritative` (only `ai_matched`/`user_entered` records), `ambiguous_nutrient_source`, `basis_unreconcilable` (e.g. volume input vs per-100 g basis without density; `conversion_reason` says why), `non_authoritative_quantity` (the only path to the basis uses an `ai_matched` serving weight or density), `quantity_unresolved`, and (Layer 6A, recipe aggregates only) `item_unresolved` — the item never reached the engine, e.g. an unmatched recipe ingredient (§17). Layer 7A meal aggregates may also list `partial_contribution` in `missing[]` (§18). Only `resolved` carries a value; every other status has `value: null`, never 0.
 
 **Source-resolution policy** (one Food + one Nutrient → at most one record; `sourceResolution.ts`):
 1. Only `trusted_database` and `manufacturer_label` values can be authoritative.
@@ -404,3 +404,67 @@ Response (`/nutrition`; the detail DTO embeds the same object without `ingredien
 **Personalized variants** — read only. A variant references its base Recipe and base RecipeVersion, belongs to one Profile (read: `full_management`, `view_only`, `pediatric_weight_management` per RLS), and never overwrites the base. `adjustments_payload` is returned as stored; its structure is not specified (Data Dictionary §23), so creating/editing variants and variant nutrition are **deferred**.
 
 **Deferred** — `DELETE`/archive (Data Dictionary §19 defers shared-library deletion implications to `10_Recipe_Library.md`; RLS still permits a manager to delete, but no endpoint exposes it); visibility changes and shared-library/community discovery; RecipeCategory/RecipeTag/RecipeRating (Data Dictionary §34) and favorites (no approved entity); ingredient preparation/notes fields (none in the schema — kept in `text`); variant mutation and nutrition; nutrition snapshots; URL/social import, AI extraction/matching, OCR, barcode/product.
+
+---
+
+## 18. Phase 2 Layer 7A — Food & Meal Logging Core (implemented)
+
+Records what a Profile **actually consumed**, using the existing `MealLog`/`MealItem` model (no second meal system, no planning entities). Every consumed item carries an immutable **nutrition snapshot** recorded at logging time, so history never changes when reference data or recipes change. Same authentication → API authorization → RLS chain, error envelope and cursor pagination as §12–§17. Migration: `20261002120000_meal_logging_core.sql`. Code: `api/src/domain/meals/`.
+
+**Actual consumption vs planning.** Logging writes items directly as `consumed` (the server calculates the snapshot first); it does not walk `draft → planned → confirmed → consumed`, which remains the lifecycle for the future Meal Planning workflow. No planned/confirmed state is used here, and no MealPlan/PlannedMeal entity exists.
+
+**Endpoints** (all under `/v1/profiles/{profile_id}/meals`):
+
+| Method & path | Scopes | Purpose |
+|---|---|---|
+| `GET /?from=&to=&cursor=&limit=` | read | Meal history, newest local day first; `from`/`to` filter `logged_date` (inclusive) |
+| `POST /` | write | Create a MealLog, optionally with its first items, **atomically** (201) |
+| `GET /{meal_log_id}` | read | Meal detail: every item (active and superseded) + meal nutrition summary |
+| `GET /{meal_log_id}/nutrition` | read | Meal aggregate with all nutrients, plus each item's summary |
+| `POST /{meal_log_id}/items` | write | Add consumed items atomically (201, meal detail) |
+| `GET /{meal_log_id}/items/{meal_item_id}` | read | One item with its full recorded nutrients and provenance |
+| `POST /{meal_log_id}/items/{meal_item_id}/correct` | write | Atomic correction (201, the new item) |
+
+No `PATCH`/`PUT`/`DELETE` of items, no void/remove, no planning endpoints.
+
+**Authorization** — transcribed from `20260825121600_rls_meals.sql` and `20260825121900_rls_pediatric_weight_management.sql`, never broadened: *read* = `full_management`, `view_only`, `pediatric_weight_management`; *write* (log, add, correct) = `full_management`, `pediatric_weight_management` (the approved matrix grants pediatric scope nutrition logging; this layer is logging only — no targets, deficits, advice or AI). `view_only` → `403` on writes; no scope / revoked guardian → `404`. Routes filter on `(meal_log_id, profile_id)` in addition to RLS.
+
+**Create / add request.**
+```
+POST /meals  { meal_type: breakfast|lunch|dinner|snack|other, logged_date: "YYYY-MM-DD",
+               local_timezone: "Asia/Dubai", notes?, consumed_at?, items?: [item] (0–50) }
+POST /meals/{id}/items  { consumed_at?, items: [item] (1–50) }
+item = { type: "food",   food_id, quantity, unit | serving_id, consumed_at? }
+     | { type: "recipe", recipe_id, recipe_version_id, servings, consumed_at? }
+```
+A request-level `consumed_at` is the default for items without their own. Any invalid item rejects the whole request (`400`, every issue with its path) and nothing is written.
+
+**MealItem Food/Recipe invariant** (database-enforced): an item is a **Food item** (`food_id`, no `recipe_version_id`) or a **Recipe item** (`recipe_version_id`, no `food_id`/`food_serving_id`/`unit`) — never both, and a consumed item never neither (`meal_item_single_source`, `meal_item_consumed_has_source`, `meal_item_recipe_amount`).
+
+**Quantity/unit semantics.** Food item: `quantity` + `unit` (an exact Layer 5A registry code; synonyms and ambiguous `cup`/`tbsp` rejected, as in §15) **or** `quantity` × a `FoodServing` that must belong to that Food (composite FK `fk_meal_item_food_serving_food`); exactly one (`meal_item_unit_xor_serving`, `meal_item_consumed_food_amount`). Recipe item: `quantity` = servings of that RecipeVersion's yield (fractional allowed, `> 0`, ≤ 100); a version without a yield cannot be logged. Quantities are finite and positive (NaN/Infinity rejected). An explicit amount such as "125 g chicken" is MealItem transaction data: it **never** creates or changes a global FoodServing, and logging never writes Food, FoodServing, FoodNutrient or density data.
+
+**Same-Profile Recipe rule.** A recipe item may reference only an exact RecipeVersion of a Recipe authored by the **same Profile** (`recipe_id` + `recipe_version_id` must match: `400` otherwise); enforced in the database too (`meal_item_recipe_same_profile`). Shared/community consumption is future work. The exact `recipe_version_id` is stored permanently; history never resolves to `Recipe.current_version_id`.
+
+**Historical nutrition snapshot.** `MealItem.nutrition_snapshot` (jsonb), `nutrition_calculation_version`, `nutrition_calculated_at` — required on every consumed item (`meal_item_consumed_snapshot`) and immutable. Contents (`snapshot_version: meal-item-snapshot-7a.1`):
+- `source`: Food (`food_id`, `canonical_name`, `quantity`, `unit`, serving id/description/canonical quantity/source) or Recipe (`recipe_id`, `recipe_version_id`, `version_number`, title, yield, `servings_consumed`);
+- `nutrients[]`: per nutrient — id, key, role, unit, `coverage` (complete/partial/unavailable), status, and the **exact** value as a fraction string (`"93/2"`), null when unknown;
+- `provenance`: the Layer 5B item result (normalized quantity, conversion steps, serving/density sources, selected FoodNutrient records with source/authority/basis, excluded/ambiguous candidates) for a Food, or the Layer 6A recipe nutrition (whole, per serving, per-ingredient breakdown) for a Recipe;
+- `calculation_version` (`nutrition-calculation-5b.1`), `conversion_version` (`conversion-5a.1`).
+
+Food item values = the §15 engine result; Recipe item values = Layer 6A per-serving × servings (engine `multiplyAggregate`), keeping the recipe's own completeness (a nutrient partial across the recipe's ingredients stays partial). Later changes to Food, FoodServing, FoodNutrient, density, recipes or `Recipe.current_version_id` do not touch a recorded snapshot; a new item logged afterwards uses the current reference data.
+
+**Meal nutrition aggregation.** Computed from the **active** items' snapshots only — `status = consumed` and not superseded — never recalculated from reference data. It uses the Layer 5B engine's `aggregateCoverage` (same nutrient-unit normalization, exact rational sums, completeness rules; incompatible units such as kcal/kJ are never added), one rounding at output (6 dp, half-up), and the Layer 5C summary projection (`energy_kcal`, `protein_g`, `carbohydrate_g`, `fat_g`, `fiber_g`). Coverage per nutrient: `complete` = every active item has a complete value; `unavailable` = none has a value (`null`, never 0); otherwise `partial` (a lower bound). An item that is itself partial (e.g. a recipe with an unknown ingredient) contributes its lower bound and is listed in `missing[]` as `partial_contribution`. Nutrient definitions come from the snapshots themselves, so history does not depend on the live vocabulary. Response: `{ basis: "recorded_snapshots", precision, active_item_ids, excluded_item_ids, summary, item_count, coverage_summary, nutrients[] }` (`missing[].index` is the position in `active_item_ids`).
+
+**consumed_at vs created_at; local day.** `consumed_at` is when the food was eaten — supplied by the client (item or request level) as an ISO 8601 instant **with an offset or Z**, not more than 5 minutes in the future; `created_at` is when the record was written. `MealLog.local_timezone` is an **IANA identifier** (`Asia/Dubai`, `Europe/London`, `America/New_York`, `UTC`); offsets (`+04:00`) and abbreviations (`EST`) are rejected, in the API and the database (`meal_log_integrity`). `logged_date` is the Profile-local calendar date under `local_timezone`, and every consumed item's `consumed_at` must fall on it in that zone (API `400` on `items.N.consumed_at`; database `meal_item_consumed_local_day`). Once a meal holds consumed items, its `logged_date`/`local_timezone` cannot change. There is no Profile default timezone yet (future Preferences). A future Daily Tracker answers "what did this Profile eat on 2026-09-28 in their local day" with `logged_date` (indexed with `profile_id`).
+
+**Correction transaction.** `POST …/items/{id}/correct` `{ correction_reason (1–500 chars, required), item }` → `correct_meal_item()` in one transaction: lock the original (it must be consumed and not yet superseded — else `409`), insert the new consumed item with its **own** snapshot, `corrects_meal_item_id` and `correction_reason`, set the original's `superseded_by_meal_item_id`, and write the AuditEvent; any failure persists nothing. The correction's `consumed_at` defaults to the original's. A correction can itself be corrected (a chain); an item can be superseded only once (`uq_meal_item_corrects`). Database guarantees: a correction must target a consumed, unsuperseded item of the same meal (`meal_item_correction_target`), must supersede it before commit (deferred `meal_item_correction_completed`), and the supersession UPDATE may change **only** `superseded_by_meal_item_id`, only to a correction of that item (redefined `enforce_meal_item_status_transition`). Both rows stay stored and independently queryable; meal totals count only the latest.
+
+**Correction audit.** Written by the `AFTER UPDATE` trigger `trg_meal_item_correction_audit` (SECURITY DEFINER), which fires only on the one legitimate supersession and derives every field itself: `actor_account_id = auth.uid()`, `actor_type = user`, `event_type = meal_item_corrected`, `subject = meal_item/<original id>`, payload `{ original_meal_item_id, correction_meal_item_id, meal_log_id, profile_id }` — ids only, no quantities, nutrition, notes or reason text. Clients still have no SELECT/INSERT on `audit_event`; the trigger cannot be invoked directly, so actor, profile, event type, target and payload cannot be forged. AuditEvent remains append-only.
+
+**Notes.** `MealLog.notes` — optional, trimmed, ≤ 2000 characters; Profile-scoped meal data, never nutrition input, not sent to AI.
+
+**DTOs.** Item: `{ id, meal_log_id, source_type: food|recipe, food: { food_id, canonical_name } | null, recipe: { recipe_id, recipe_version_id, version_number, title } | null, amount: { quantity, unit, serving_id, serving_description } | { servings }, status, consumed_at, created_at, is_active, logged_by_actor_type, correction: { corrects_meal_item_id, superseded_by_meal_item_id, correction_reason }, nutrition: { basis: "recorded_snapshot", snapshot_version, calculation_version, conversion_version, calculated_at, summary, coverage_summary } }` — names and figures come from the snapshot, as recorded. Item detail adds `nutrition.nutrients[]` and `nutrition.provenance`. Account ids are not exposed; `status_changed_by_account_id` and the AuditEvent hold who logged/corrected.
+
+**Future compatibility (not built).** A future PlannedMeal links to actual consumption by referencing the consumed MealItem(s) (and may reference the same exact `recipe_version_id`); planned and actual stay separate records. The Daily Tracker aggregates active consumed items' snapshots per `(profile_id, logged_date)` with the same `aggregateCoverage`.
+
+**Deferred.** Void/remove of a consumed item (no approved semantics; no DELETE); Profile default timezone; logging `RecipePersonalizedVariant`s (column exists, not accepted); editing `meal_type`/`notes` after creation; database-pushed pagination (meal history uses the shared 1000-row in-memory convention).

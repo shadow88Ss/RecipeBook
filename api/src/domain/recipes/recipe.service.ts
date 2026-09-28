@@ -184,7 +184,7 @@ export class RecipeService {
     const content = await loadVersionContent(db, recipe.id, versionId);
     return {
       ...toVersionDto(content, recipe.current_version_id),
-      nutrition: toRecipeNutritionDto(await nutritionFor(db, content), { includeIngredients: false }),
+      nutrition: toRecipeNutritionDto(await recipeVersionNutrition(db, content), { includeIngredients: false }),
     };
   }
 
@@ -202,7 +202,7 @@ export class RecipeService {
       recipe_version_id: content.version.id,
       version_number: content.version.version_number,
       is_current: content.version.id === recipe.current_version_id,
-      ...toRecipeNutritionDto(await nutritionFor(db, content), { includeIngredients: true }),
+      ...toRecipeNutritionDto(await recipeVersionNutrition(db, content), { includeIngredients: true }),
     };
   }
 
@@ -223,7 +223,7 @@ export class RecipeService {
       updated_at: recipe.updated_at,
       version_count: versions.length,
       current_version: current ? toVersionDto(current, recipe.current_version_id) : null,
-      nutrition: current ? toRecipeNutritionDto(await nutritionFor(db, current), { includeIngredients: false }) : null,
+      nutrition: current ? toRecipeNutritionDto(await recipeVersionNutrition(db, current), { includeIngredients: false }) : null,
     };
   }
 
@@ -307,14 +307,14 @@ async function writeVersion(
 
 /** Filtering on (id, created_by_profile_id) keeps every recipe route inside
  * its Profile, on top of RLS. */
-async function loadRecipe(db: ScopedDbClient, profileId: string, recipeId: string): Promise<RecipeRow> {
+export async function loadRecipe(db: ScopedDbClient, profileId: string, recipeId: string): Promise<RecipeRow> {
   const rows = await db.select<RecipeRow>('recipe', { columns: RECIPE_COLUMNS, eq: { id: recipeId, created_by_profile_id: profileId }, limit: 1 });
   const row = rows[0];
   if (!row) throw AppError.notFound('Recipe not found.');
   return row;
 }
 
-async function loadVersionContent(db: ScopedDbClient, recipeId: string, versionId: string): Promise<VersionContent> {
+export async function loadVersionContent(db: ScopedDbClient, recipeId: string, versionId: string): Promise<VersionContent> {
   const versions = await db.select<RecipeVersionRow>('recipe_version', {
     columns: RECIPE_VERSION_COLUMNS,
     eq: { id: versionId, recipe_id: recipeId },
@@ -337,7 +337,7 @@ async function loadVersionContent(db: ScopedDbClient, recipeId: string, versionI
   return { version, ingredients, instructions };
 }
 
-async function nutritionFor(db: ScopedDbClient, content: VersionContent) {
+export async function recipeVersionNutrition(db: ScopedDbClient, content: VersionContent) {
   const foodIds = content.ingredients.flatMap((i) => (i.food_id ? [i.food_id] : []));
   const { foods, vocabulary } = await loadNutritionReference(db, foodIds);
   return calculateRecipeNutrition(content.ingredients, foods, vocabulary, content.version.servings);

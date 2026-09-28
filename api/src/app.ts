@@ -32,6 +32,8 @@ import { NutritionService } from './domain/nutrition/nutrition.service';
 import { createRecipeRouter, createRecipeVariantRouter } from './domain/recipes/recipe.routes';
 import { RecipeService } from './domain/recipes/recipe.service';
 import { RecipeVariantService } from './domain/recipes/recipeVariant.service';
+import { createMealRouter } from './domain/meals/meal.routes';
+import { MealService } from './domain/meals/meal.service';
 import type { ScopedDbFactory } from './lib/scopedDb';
 import type { Logger } from './lib/logger';
 import { AppError } from './lib/errors';
@@ -66,6 +68,7 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   const nutritionService = new NutritionService(scopedDbFactory);
   const recipeService = new RecipeService(scopedDbFactory);
   const recipeVariantService = new RecipeVariantService(scopedDbFactory);
+  const mealService = new MealService(scopedDbFactory);
 
   const v1 = express.Router();
   v1.use('/profiles', requireAuth, createProfileRouter(profileService));
@@ -76,6 +79,8 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   // Layer 6A — Recipe Book core (nutrition through the Layer 5B engine).
   v1.use('/profiles/:profile_id/recipes', requireAuth, createRecipeRouter(recipeService));
   v1.use('/profiles/:profile_id/recipe-variants', requireAuth, createRecipeVariantRouter(recipeVariantService));
+  // Layer 7A — actual food/meal consumption logging (snapshotted nutrition).
+  v1.use('/profiles/:profile_id/meals', requireAuth, createMealRouter(mealService));
   v1.use('/profiles/:profile_id', requireAuth, createEffectiveTargetRouter(effectiveTargetService));
   // Layer 5A — global food reference data and deterministic conversion
   // (not profile-scoped; see food.service.ts).

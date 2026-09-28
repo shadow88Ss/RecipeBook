@@ -257,10 +257,12 @@ Row is write-once; no update path exists for any field after insert (Master §8,
 | id | uuid | not null | — | PK | system_computed | — | no | — |
 | profile_id | uuid | not null | — | FK → Profile | system_computed | — | no | index |
 | meal_type | enum(`breakfast`,`lunch`,`dinner`,`snack`,`other`) | not null | — | — | user_entered / system_computed | fixed set | yes | — |
-| logged_date | date | not null | — | — | user_entered / system_computed | profile-local date | yes (while items remain draft/planned) | — |
+| logged_date | date | not null | — | — | user_entered / system_computed | profile-local calendar date under `local_timezone`; every consumed item's `consumed_at` falls on it (Layer 7A) | yes (while items remain draft/planned); fixed once the meal holds a consumed item | — |
+| local_timezone | text | not null for new rows (`meal_log_local_timezone_required`, NOT VALID) | — | — | user_entered | IANA identifier (e.g. `Asia/Dubai`, `UTC`); offsets and abbreviations rejected (`meal_log_integrity`) | no once the meal holds a consumed item | Layer 7A. The zone in which `logged_date` is a local day. No Profile default timezone yet |
+| notes | text | nullable | null | — | user_entered | ≤ 2000 characters | set at creation | Layer 7A. Profile-scoped meal data; never nutrition input, not sent to AI |
 | created_at / updated_at | timestamp | not null | now() | — | system_computed | — | no | — |
 
-Index: `(profile_id, logged_date)`.
+Index: `(profile_id, logged_date)`. Unique `(id, profile_id)` (target of MealItem's profile-consistency FK).
 
 ---
 
@@ -275,22 +277,28 @@ Index: `(profile_id, logged_date)`.
 | id | uuid | not null | — | PK | system_computed | — | no | — |
 | meal_log_id | uuid | not null | — | FK → MealLog | system_computed | — | no | index |
 | profile_id | uuid | not null | — | FK → Profile (denormalized) | system_computed | must match parent MealLog's profile_id | no | direct RLS filter |
-| recipe_version_id | uuid | nullable | null | FK → RecipeVersion | user_entered | — | at draft/planned only | mutually exclusive-ish with `food_id` (either a recipe or a raw food is logged) |
+| recipe_version_id | uuid | nullable | null | FK → RecipeVersion | user_entered | exactly one of `food_id`/`recipe_version_id` on a consumed item, never both (Layer 7A); must be a version of a Recipe authored by the same Profile (`meal_item_recipe_same_profile`) | at draft/planned only | the exact version consumed — never re-resolved to `Recipe.current_version_id` |
 | recipe_personalized_variant_id | uuid | nullable | null | FK → RecipePersonalizedVariant | user_entered | — | at draft/planned only | — |
 | food_id | uuid | nullable | null | FK → Food | user_entered / ai_derived | — | at draft/planned only | — |
-| food_serving_id | uuid | nullable | null | FK → FoodServing | user_entered / ai_derived | — | at draft/planned only | — |
-| quantity | numeric | not null | — | — | user_entered / ai_derived | positive | at draft/planned only | — |
+| food_serving_id | uuid | nullable | null | FK → FoodServing; `(food_serving_id, food_id)` → FoodServing | user_entered / ai_derived | must belong to `food_id`; exclusive with `unit`; absent on a recipe item | at draft/planned only | — |
+| unit | text | nullable | null | — | user_entered | exact Layer 5A registry code; Food items only; a consumed Food item has exactly one of `unit`/`food_serving_id` | at draft/planned only | Layer 7A |
+| quantity | numeric | not null | — | — | user_entered / ai_derived | positive | at draft/planned only | Food item: amount in `unit` or number of `food_serving_id` servings. Recipe item: servings of the RecipeVersion's yield (fractional allowed). Transaction data — never a global FoodServing |
 | status | enum(`draft`,`planned`,`confirmed`,`consumed`,`skipped`,`cancelled`) | not null | `draft` | — | system_computed | transitions per `29_Data_Model.md` §3.2 only | via defined transition actions only, never a free-form field edit | canonical Phase 1 lifecycle enum |
 | confirmed_at | timestamp | nullable | null | — | system_computed | set only on `planned → confirmed` | no | — |
-| consumed_at | timestamp | nullable | null | — | system_computed | set only on `confirmed → consumed` | no | — |
+| consumed_at | timestamp | nullable | null | — | system_computed / user_entered | set on `confirmed → consumed`; for direct actual logging (Layer 7A) supplied by the client — when it was eaten, not when logged; not in the future; on the MealLog's `logged_date` in its `local_timezone` | no | distinct from `created_at` (when the record was written) |
 | status_changed_by_actor_type | enum(`user`,`ai_optimizer`,`system`) | not null | `user` | — | system_computed | — | no | — |
 | status_changed_by_account_id | uuid | nullable | null | FK → Account | system_computed | required if `status_changed_by_actor_type = user` | no | — |
 | corrects_meal_item_id | uuid | nullable | null | self-FK → MealItem | system_computed | only settable when creating a correction row for a `consumed` item | no | — |
 | superseded_by_meal_item_id | uuid | nullable | null | self-FK → MealItem | system_computed | set on the original when a correction is created | no | — |
 | correction_reason | text | nullable | null | — | user_entered | required if `corrects_meal_item_id` set | at correction time only | — |
-| created_at / updated_at | timestamp | not null | now() | — | system_computed | — | no | — |
+| nutrition_snapshot | jsonb | required when consumed | null | — | system_computed | `meal-item-snapshot-7a.1`: source, exact per-nutrient values + coverage, Layer 5B/6A provenance, rule versions | no — immutable once consumed | Layer 7A. The nutrition recorded at logging time; history is read only from it |
+| nutrition_calculation_version | text | required when consumed | null | — | system_computed | e.g. `nutrition-calculation-5b.1` | no | Layer 7A |
+| nutrition_calculated_at | timestamp | required when consumed | null | — | system_computed | — | no | Layer 7A |
+| created_at / updated_at | timestamp | not null | now() | — | system_computed | — | no | items logged together get strictly increasing `created_at` (logging order) |
 
-Indexes: `(profile_id, meal_log_id)`, `(status)`.
+Indexes: `(profile_id, meal_log_id)`, `(status)`, `(meal_log_id, status)`, unique `corrects_meal_item_id` (an item is superseded at most once). Composite FK `(meal_log_id, profile_id)` → MealLog enforces `profile_id` = the MealLog's.
+
+Layer 7A consumed-row rules (`20261002120000`): a consumed item must have a source, an amount form valid for it, `consumed_at` and a complete snapshot; once consumed, the only permitted UPDATE sets `superseded_by_meal_item_id` once, to a correction of that item, with every other column unchanged; a correction row must target a consumed, unsuperseded item of the same MealLog and must supersede it in the same transaction; the supersession writes an AuditEvent (`meal_item_corrected`, ids only) via a SECURITY DEFINER trigger. No void/remove exists (deferred).
 
 ---
 

@@ -94,6 +94,18 @@ export function roundHalfUp(value: Rational, places: number): string {
   return fracPart ? `${intPart}.${fracPart}` : intPart;
 }
 
+/** Layer 7A — lossless text form of a non-negative rational ("1/3", "15/2",
+ * "0/1"), for storing exact values in historical snapshots. */
+export function toFractionString(value: Rational): string {
+  return `${value.n.toString()}/${value.d.toString()}`;
+}
+
+export function parseFraction(text: string): Rational {
+  const match = /^(\d+)\/(\d+)$/.exec(text);
+  if (!match) throw new Error(`Not a non-negative fraction: ${text}`);
+  return make(BigInt(match[1] ?? '0'), BigInt(match[2] ?? '1'));
+}
+
 /** Exact decimal string of a rational whose denominator has only 2/5
  * factors (true of every factor in the unit registry); otherwise rounds to
  * 12 places. Used only to report the factors a conversion applied. */

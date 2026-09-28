@@ -135,8 +135,10 @@ export interface AggregateNutrient {
   coverage: Coverage;
   resolved_item_count: number;
   item_count: number;
-  /** Items whose value is not included, with why. */
-  missing: Array<{ index: number; status: NutrientStatus | 'incompatible_unit' }>;
+  /** Items whose value is not included, with why. Layer 7A: an item whose
+   * own value is a partial lower bound is included in `value` but listed
+   * here as `partial_contribution`. */
+  missing: Array<{ index: number; status: NutrientStatus | 'incompatible_unit' | 'partial_contribution' }>;
 }
 
 function baseUnitOf(amount: ConversionEndpoint, food: FoodConversionData): string | null {
@@ -297,6 +299,75 @@ export function divideAggregate(aggregate: readonly AggregateNutrient[], divisor
   const d = fromNumber(divisor);
   if (isZero(d)) throw new Error('divideAggregate requires a positive divisor.');
   return aggregate.map((n) => ({ ...n, value: n.value === null ? null : div(n.value, d) }));
+}
+
+/** Layer 7A — multiplies every aggregate value by a positive factor, exactly
+ * (e.g. per serving -> 1.5 servings consumed). Coverage, counts and
+ * `missing` are unchanged; same operation for every nutrient. */
+export function multiplyAggregate(aggregate: readonly AggregateNutrient[], factor: number): AggregateNutrient[] {
+  const f = fromNumber(factor);
+  if (isZero(f)) throw new Error('multiplyAggregate requires a positive factor.');
+  return aggregate.map((n) => ({ ...n, value: n.value === null ? null : mul(n.value, f) }));
+}
+
+/** One item's already-calculated value for one nutrient, with its own
+ * completeness (a whole-recipe item can itself be partial). */
+export interface CoverageContribution {
+  nutrient_id: string;
+  coverage: Coverage;
+  /** Why the value is absent; carried into `missing` for an unavailable item. */
+  status: NutrientStatus | 'incompatible_unit';
+  /** Present for complete and partial (a lower bound); null when unavailable. */
+  value: Rational | null;
+  unit: string;
+}
+
+/**
+ * Layer 7A — aggregates items that are themselves already calculated
+ * results (e.g. consumed MealItem snapshots), preserving each item's
+ * completeness. Same rules as aggregateNutrients — values normalized to the
+ * nutrient's unit (incompatible units never added), exact sums — with one
+ * generalization: an item whose value is a partial lower bound contributes
+ * its value but keeps the total partial. complete = every item complete;
+ * unavailable = no item has a value; otherwise partial.
+ * aggregateNutrients is this function where every item is complete or
+ * unavailable.
+ */
+export function aggregateCoverage(
+  vocabulary: readonly NutrientDefinition[],
+  items: ReadonlyArray<{ index: number; nutrients: readonly CoverageContribution[] }>,
+): AggregateNutrient[] {
+  return vocabulary.map((nutrient) => {
+    let total: Rational = ZERO;
+    let withValue = 0;
+    let complete = 0;
+    const missing: AggregateNutrient['missing'] = [];
+    for (const item of items) {
+      const entry = item.nutrients.find((n) => n.nutrient_id === nutrient.id);
+      if (!entry || entry.coverage === 'unavailable' || entry.value === null) {
+        missing.push({ index: item.index, status: entry?.status ?? 'no_data' });
+        continue;
+      }
+      const normalized = convertNutrientAmount(entry.value, entry.unit, nutrient.unit);
+      if (normalized === null) {
+        missing.push({ index: item.index, status: 'incompatible_unit' });
+        continue;
+      }
+      total = add(total, normalized);
+      withValue += 1;
+      if (entry.coverage === 'complete') complete += 1;
+      else missing.push({ index: item.index, status: 'partial_contribution' });
+    }
+    const coverage: Coverage = withValue === 0 ? 'unavailable' : complete === items.length ? 'complete' : 'partial';
+    return {
+      nutrient,
+      value: withValue === 0 ? null : total,
+      coverage,
+      resolved_item_count: complete,
+      item_count: items.length,
+      missing,
+    };
+  });
 }
 
 export interface NutritionCalculation {
