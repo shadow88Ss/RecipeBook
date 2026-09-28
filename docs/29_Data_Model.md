@@ -113,6 +113,10 @@ Fields:
 
 No screen, module, or AI prompt computes an effective target independently. All consumers (Daily Tracker, Adaptive Nutrition Coach, Meal Planning, Analytics) call the single resolver.
 
+### 4.5 Historical target applicability (gap recorded by Layer 7B)
+
+`EffectiveTargetSnapshot` has no Profile-local date and nothing currently creates a snapshot per day or per consumed meal, so the target that applied on an arbitrary past local day cannot be determined reliably. The Daily Tracker (`30_API.md` §19) therefore compares against the resolver only for the current local day and reports `historical_target_unavailable` for past days — it never compares past consumption with today's target. Enabling historical comparison requires an approved snapshot policy (e.g. which event creates a day-applicable snapshot, which snapshot applies when targets change mid-day, and who may create it given that `pediatric_weight_management`/`view_only` cannot insert snapshots).
+
 ---
 
 ## 5. Clinician-Defined Targets

@@ -470,3 +470,48 @@ Food item values = the §15 engine result; Recipe item values = Layer 6A per-ser
 **Trust boundary — application-authoritative snapshots.** Consumed nutrition snapshots are server-generated historical records. The supported write path is *client → `/v1` API → deterministic nutrition engine → user-scoped Supabase connection → RLS → MealItem snapshot*. Clients submit consumption facts (Food or exact RecipeVersion, quantity, unit/serving, `consumed_at`, meal context), never nutrition totals: no request schema on these endpoints declares `nutrition_snapshot`, `nutrition_calculation_version` or any nutrient value, so under the unknown-field policy (§12, `middleware/validate.ts`) such fields are stripped before the service runs, and the snapshot is always computed by the engine — for logging and for corrections alike (tested). **Known limitation:** the API writes with the caller's own user-scoped database identity, so an Account that already has write permission for a Profile can technically call Supabase directly (e.g. `log_meal_items()`) and store a correctly shaped but fabricated snapshot for that Profile. PostgreSQL cannot prove a snapshot came from the TypeScript engine, so the guarantee is **application-authoritative, not cryptographically attested**. The limitation is confined to Profiles the Account already manages; it does not permit cross-Profile or cross-Account access, RLS bypass, editing an existing consumed snapshot, breaking correction immutability or the correction chain, or modifying global Food/Nutrient reference data — all of which remain database-enforced. **Possible future hardening (recorded, not designed or approved):** server-signed consumed snapshots — e.g. an API-held signing key with key id/version, secret storage such as Supabase Vault, pgcrypto verification in the database, canonical payload serialization, key rotation and optional replay/nonce protection — subject to a separate architecture/security review.
 
 **Deferred.** Void/remove of a consumed item (no approved semantics; no DELETE); Profile default timezone; logging `RecipePersonalizedVariant`s (column exists, not accepted); editing `meal_type`/`notes` after creation; database-pushed pagination (meal history uses the shared 1000-row in-memory convention).
+
+---
+
+## 19. Phase 2 Layer 7B — Daily Nutrition Tracker (implemented)
+
+A **read model** answering "what did this Profile consume on this local calendar day, and how does it compare with the Profile's effective targets". It computes nothing authoritative, persists nothing and writes nothing (no MealLog, MealItem, EffectiveTargetSnapshot, Goal, target, Food, Recipe or AuditEvent row — tested). No schema change. Code: `api/src/domain/dailyTracker/`.
+
+**Endpoint.** `GET /v1/profiles/{profile_id}/daily-tracker?date=YYYY-MM-DD&timezone=<IANA>` — both required. `date` is the Profile-local calendar day; `timezone` is the caller's IANA zone, used **only** to decide whether `date` is the current local day (there is no Profile default timezone and no server-local "today"). A `date` after the current local date in `timezone` is `400`. Read scopes: `full_management`, `view_only`, `pediatric_weight_management` (the existing meal and target read policies); no scope / revoked → `404`. GET only.
+
+**Local-day semantics.** A day's meals are the MealLogs with `logged_date = date` (Layer 7A: `logged_date` is the local day under each MealLog's own `local_timezone`, and every consumed item's `consumed_at` falls on it). Meals are never grouped by UTC date: the same instant logged in Asia/Dubai and America/New_York lands on the respective local dates (tested). A day can contain meals logged in different zones (travel); each meal reports its `local_timezone`.
+
+**Actual intake — snapshot-only.** MealLogs of the day → **active** consumed MealItems (`consumed`, not superseded; draft/planned/confirmed/skipped/cancelled and superseded originals never count) → their immutable Layer 7A `nutrition_snapshot`s → `aggregateSnapshots` (engine `aggregateCoverage`: nutrient-unit normalization, exact arithmetic, completeness) → one rounding at output → Layer 5C summary (`energy_kcal`, `protein_g`, `carbohydrate_g`, `fat_g`, `fiber_g`, each with value/null, coverage, status) plus every nutrient. Nothing is recalculated from Food, FoodServing, FoodNutrient, density or recipes: later reference-data changes or recipe edits leave a day unchanged (tested). A correction replaces its original in the totals (counted once). `actual.basis` is `recorded_snapshots`, or `no_consumption` for a day with no active items — then every nutrient is a **known zero** (`value: 0`, `is_zero: true`, `coverage: complete`), distinct from unknown data inside consumed items (which stays partial/unavailable, never 0). Viewing an empty day creates no rows.
+
+**Target — current day only.** The single EffectiveTargetResolver (`EffectiveTargetService.resolve`, sources `clinician_target` > `user_target`; no derived/TDEE/pediatric/wearable targets) is called for the **current local day only**; `target.fields[]` carries `field_name`, `value`, `unit`, `source`, `source_reference` (the target row id — no account ids). **Historical days return `target.status` and `comparison.status` = `historical_target_unavailable`** with no fields and no comparison: EffectiveTargetSnapshot has no local-date key and nothing yet creates day-applicable snapshots, so the target that applied on a past day cannot be determined reliably, and comparing past consumption with today's target is refused rather than guessed (see `29_Data_Model.md` §4.5).
+
+**Target-to-nutrient mapping** (explicit, never guessed). A resolved field is compared with a nutrient only if its `field_name` is a canonical nutrient key (Layer 5C: `protein`, `iron`, `vitamin_d`, …) and its unit converts exactly to that nutrient's reporting unit (g/mg/mcg; kcal only to kcal), or its `field_name` is a Layer 5C summary field (`energy_kcal`, `protein_g`, `carbohydrate_g`, `fat_g`, `fiber_g`) with exactly that field's unit. Anything else is listed in `comparison.unmapped_targets[]` with a reason: `unknown_field` (e.g. `calories`), `incompatible_unit` (e.g. carbohydrate in kcal, `energy_kcal` in kJ), `duplicate_target_for_nutrient` (e.g. both `fat` and `fat_g` — neither is compared), `invalid_value`. Target field names remain free-form at write time (§13); an approved target-field vocabulary is still outstanding.
+
+**Comparison contract** (`comparison.nutrients[]`, one per mapped target; values in the nutrient's reporting unit; exact arithmetic, rounded at output; measurement only — no judgemental labels):
+
+| actual coverage | relation | `comparison_status` | `remaining` | `remaining_at_most` | `over_target_by` | `over_target_by_at_least` |
+|---|---|---|---|---|---|---|
+| complete | A < T | `below_target` | T − A | null | 0 | null |
+| complete | A = T | `at_target` | 0 | null | 0 | null |
+| complete | A > T | `above_target` | 0 | null | A − T | null |
+| partial (A is a lower bound) | A < T | `undetermined` | **null** | T − A | null | null |
+| partial | A = T | `at_or_above_target` | 0 | null | null | null |
+| partial | A > T | `above_target` | 0 | null | null | A − T |
+| unavailable | — | `actual_unavailable` | null | null | null | null |
+
+`remaining` is never negative and is exact only when actual intake is complete; a partial total yields at most an upper bound on what remains. Each entry also carries `actual` (value, coverage) and `target` (converted value, `field_name`, `source`, `source_reference`, original value/unit). Micronutrients follow the same contract; nutrients without a target appear only in `actual`.
+
+**Response.**
+```
+{ profile_id, date, timezone, is_current_day, meal_count, active_item_count,
+  actual: { basis: recorded_snapshots|no_consumption, precision, conversion_version, summary, item_count, coverage_summary, nutrients[] },
+  target: { status: current|historical_target_unavailable, resolver_version, resolved_at, implemented_sources, fields[] },
+  comparison: { status: available|historical_target_unavailable, nutrients[], unmapped_targets[] },
+  meal_groups: [{ meal_type, meals: [{ id, meal_type, logged_date, local_timezone, notes, created_at,
+                                       active_item_count, items: [active item DTOs, §18], nutrition: { summary, item_count, coverage_summary } }] }] }
+```
+`meal_groups` follow the order breakfast, lunch, dinner, snack, other and include only types present. Only active items appear; correction history stays on the Meal APIs (§18). No account ids, RLS scope, audit or security data is returned.
+
+**Performance.** Per request: profile scope check, one `meal_log` query for the day, one `meal_item` query for all of that day's meals, the nutrient vocabulary, and (current day only) the resolver's two target queries — no per-item queries, no caching. The shared 1000-row safety bound applies to a day's meal logs and items (far above a real day); no pagination is needed for a single day and none is introduced.
+
+**Deferred.** Historical target comparison (needs a day-applicable target snapshot policy — §4.5 of the Data Model); an approved target field vocabulary (`calories` etc.); a Profile default timezone / "today" convenience endpoint; day ranges and trends; planned-vs-actual, adherence and goal scoring; wearable-adjusted targets.

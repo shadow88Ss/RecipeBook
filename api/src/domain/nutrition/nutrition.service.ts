@@ -60,6 +60,15 @@ export interface NutritionReference {
   vocabulary: NutrientDefinition[];
 }
 
+/** The nutrient vocabulary (definitions only — no food data). */
+export async function loadNutrientVocabulary(db: ScopedDbClient): Promise<NutrientDefinition[]> {
+  return db.select<NutrientDefinition>('nutrient', {
+    columns: 'id, canonical_key, unit, role',
+    order: { column: 'canonical_key', ascending: true },
+    limit: IN_MEMORY_PAGE_FETCH_CAP,
+  });
+}
+
 /** Loads everything the engine needs for these foods, under the caller's own
  * RLS-scoped client. Shared by every engine caller (Layer 6A recipes too) so
  * reference-data loading exists once. */
@@ -75,11 +84,7 @@ export async function loadNutritionReference(db: ScopedDbClient, foodIdList: rea
       columns: 'id, food_id, nutrient_id, amount_per_canonical_unit, basis_quantity, basis_unit, source',
       in: { food_id: foodIds },
     }),
-    db.select<NutrientDefinition>('nutrient', {
-      columns: 'id, canonical_key, unit, role',
-      order: { column: 'canonical_key', ascending: true },
-      limit: IN_MEMORY_PAGE_FETCH_CAP,
-    }),
+    loadNutrientVocabulary(db),
   ]);
 
   const data = new Map<string, FoodNutritionData>();

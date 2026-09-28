@@ -34,6 +34,8 @@ import { RecipeService } from './domain/recipes/recipe.service';
 import { RecipeVariantService } from './domain/recipes/recipeVariant.service';
 import { createMealRouter } from './domain/meals/meal.routes';
 import { MealService } from './domain/meals/meal.service';
+import { createDailyTrackerRouter } from './domain/dailyTracker/dailyTracker.routes';
+import { DailyTrackerService } from './domain/dailyTracker/dailyTracker.service';
 import type { ScopedDbFactory } from './lib/scopedDb';
 import type { Logger } from './lib/logger';
 import { AppError } from './lib/errors';
@@ -69,6 +71,7 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   const recipeService = new RecipeService(scopedDbFactory);
   const recipeVariantService = new RecipeVariantService(scopedDbFactory);
   const mealService = new MealService(scopedDbFactory);
+  const dailyTrackerService = new DailyTrackerService(scopedDbFactory, effectiveTargetService);
 
   const v1 = express.Router();
   v1.use('/profiles', requireAuth, createProfileRouter(profileService));
@@ -81,6 +84,8 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   v1.use('/profiles/:profile_id/recipe-variants', requireAuth, createRecipeVariantRouter(recipeVariantService));
   // Layer 7A — actual food/meal consumption logging (snapshotted nutrition).
   v1.use('/profiles/:profile_id/meals', requireAuth, createMealRouter(mealService));
+  // Layer 7B — Daily Nutrition Tracker (read model over 7A snapshots + the resolver).
+  v1.use('/profiles/:profile_id/daily-tracker', requireAuth, createDailyTrackerRouter(dailyTrackerService));
   v1.use('/profiles/:profile_id', requireAuth, createEffectiveTargetRouter(effectiveTargetService));
   // Layer 5A — global food reference data and deterministic conversion
   // (not profile-scoped; see food.service.ts).
