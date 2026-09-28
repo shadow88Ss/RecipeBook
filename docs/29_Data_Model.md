@@ -78,7 +78,17 @@ Automatic optimizer/coach write access to `MealItem.status`-derived fields is li
 - `PlannedMeal`: `meal_type` (the shared `meal_type` enum), optional `scheduled_local_time`, `notes`, `position`.
 - `PlannedMealItem`: exactly one source — a Food (`food_id` + `quantity` + `unit` **or** `food_serving_id`) or an exact RecipeVersion (`recipe_id` + `recipe_version_id` + `quantity` = servings) of a recipe of the same Profile; `status` `draft | planned | confirmed | cancelled`; at confirmation an immutable server-computed `nutrition_snapshot` (+ `nutrition_calculation_version`, `nutrition_calculated_at`, `confirmed_at`); `supersedes_planned_meal_item_id` / `superseded_by_planned_meal_item_id` for accepted replacements.
 - Confirmation state is per item; the only public confirmation today is whole-plan (`confirm_meal_plan()`), but nothing in the schema requires a plan's items to be confirmed together.
-- Relationships: `Profile 1..N MealPlan 1..N MealPlanDay 1..N PlannedMeal 1..N PlannedMealItem`; composite `(id, profile_id)` keys keep every child in its plan's Profile. No link to MealLog/MealItem yet (Layer 8B extension point: a planned→actual relation referencing stable PlannedMealItem ids, leaving both records unchanged).
+- Relationships: `Profile 1..N MealPlan 1..N MealPlanDay 1..N PlannedMeal 1..N PlannedMealItem`; composite `(id, profile_id)` keys keep every child in its plan's Profile. Planned intent is related to actual consumption only through §3.6 (Layer 8B), which leaves both records unchanged.
+
+### 3.6 Planned vs actual (Phase 2 Layer 8B)
+
+Two additive, Profile-owned relationship records; `PlannedMealItem` (8A) and `MealItem` (7A) are not modified and nothing is deleted. Fulfillment is **derived at read time**, never stored.
+
+- `PlannedActualLink`: an explicit, user-asserted relation between a **current confirmed** `PlannedMealItem` and an **active** consumed `MealItem`, `relationship_type` `same_item` (same Food / exact RecipeVersion) or `substitution` (a different one). Active or revoked (`revoked_at`, `revoked_by_account_id`); revocation is the only change. The link keeps the MealItem id it was created with and records the root of that item's 7A correction chain (`meal_item_chain_root_id`); reads resolve the chain (`superseded_by_meal_item_id`) to the active record.
+- `PlannedMealItemSkip`: "confirmed intent explicitly not consumed" — distinct from `PlannedMealItem.status = cancelled` (intent removed). Optional `reason`; active or revoked (unskip revokes).
+- Database invariants (triggers serialized by transaction-scoped advisory locks — planned item first, then actual chain): at most one active skip per planned item; a planned item never has an active skip and an active link together; one actual correction chain actively links to at most one **current** planned item and at most once per planned item; the actual record is active and its `consumed_at`, converted to `MealPlan.local_timezone`, falls on `MealPlanDay.plan_date`; links/skips are created or revoked only on `active` or `completed` plans; composite `(id, profile_id)` keys keep every side in one Profile.
+- Relationships: `PlannedMealItem 1..N PlannedActualLink N..1 MealItem`; `PlannedMealItem 1..N PlannedMealItemSkip` (at most one active).
+- Derived fulfillment states: `unlinked`, `partial`, `fulfilled_exact`, `above_planned_quantity`, `fulfilled_with_substitution`, `skipped`, `quantity_not_comparable`, `identity_changed_by_correction` — computed from the confirmed planned `nutrition_snapshot` and the active actual snapshots only. No adherence score.
 
 ---
 
@@ -350,6 +360,7 @@ This table is not fully populated in this document; producing it is the immediat
 - `RecipeVersion` — `origin_url_source_id`, `origin_import_job_id` (both nullable).
 - `MealLog` — `local_timezone` (IANA), `notes` (Phase 2 Layer 7A).
 - New Phase 2 Layer 8A entities: `MealPlan`, `MealPlanDay`, `PlannedMeal`, `PlannedMealItem` (§3.5); `RecipeVersion` gains unique `(id, recipe_id)` as a composite FK target.
+- New Phase 2 Layer 8B entities: `PlannedActualLink`, `PlannedMealItemSkip` (§3.6); `PlannedMealItem` and `MealItem` each gain unique `(id, profile_id)` as composite FK targets (no column or behaviour change).
 - `MealItem` — `unit`, `nutrition_snapshot`, `nutrition_calculation_version`, `nutrition_calculated_at`; Food-vs-Recipe invariant; `(meal_log_id, profile_id)` FK; same-Profile recipe rule (Phase 2 Layer 7A).
 - `RecipeIngredient` — `food_serving_id` (nullable; must belong to the ingredient's Food; exclusive with `unit`) (Phase 2 Layer 6A). `Recipe.current_version_id` must reference a version of the same Recipe (trigger), and a new version with its ingredients/instructions is written atomically by `create_recipe_version()` (SECURITY INVOKER, existing RLS).
 

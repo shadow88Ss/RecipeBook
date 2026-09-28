@@ -38,6 +38,8 @@ import { createDailyTrackerRouter } from './domain/dailyTracker/dailyTracker.rou
 import { DailyTrackerService } from './domain/dailyTracker/dailyTracker.service';
 import { createMealPlanRouter } from './domain/mealPlans/mealPlan.routes';
 import { MealPlanService } from './domain/mealPlans/mealPlan.service';
+import { createPlanFulfillmentRouter } from './domain/mealPlans/planFulfillment.routes';
+import { PlanFulfillmentService } from './domain/mealPlans/planFulfillment.service';
 import type { ScopedDbFactory } from './lib/scopedDb';
 import type { Logger } from './lib/logger';
 import { AppError } from './lib/errors';
@@ -75,6 +77,7 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   const mealService = new MealService(scopedDbFactory);
   const dailyTrackerService = new DailyTrackerService(scopedDbFactory, effectiveTargetService);
   const mealPlanService = new MealPlanService(scopedDbFactory, effectiveTargetService);
+  const planFulfillmentService = new PlanFulfillmentService(scopedDbFactory);
 
   const v1 = express.Router();
   v1.use('/profiles', requireAuth, createProfileRouter(profileService));
@@ -91,6 +94,8 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   v1.use('/profiles/:profile_id/daily-tracker', requireAuth, createDailyTrackerRouter(dailyTrackerService));
   // Layer 8A — Meal Planning (planned intent; separate from actual consumption).
   v1.use('/profiles/:profile_id/meal-plans', requireAuth, createMealPlanRouter(mealPlanService));
+  // Layer 8B — planned vs actual: explicit links/skips; fulfillment derived at read time.
+  v1.use('/profiles/:profile_id/meal-plans', requireAuth, createPlanFulfillmentRouter(planFulfillmentService));
   v1.use('/profiles/:profile_id', requireAuth, createEffectiveTargetRouter(effectiveTargetService));
   // Layer 5A — global food reference data and deterministic conversion
   // (not profile-scoped; see food.service.ts).

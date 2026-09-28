@@ -522,7 +522,7 @@ async function prepareItems(db: ScopedDbClient, profileId: string, inputs: reado
   return out;
 }
 
-async function loadTree(db: ScopedDbClient, profileId: string, planId: string): Promise<PlanTree> {
+export async function loadTree(db: ScopedDbClient, profileId: string, planId: string): Promise<PlanTree> {
   const plans = await db.select<MealPlanRow>('meal_plan', { columns: MEAL_PLAN_COLUMNS, eq: { id: planId, profile_id: profileId }, limit: 1 });
   const plan = plans[0];
   if (!plan) throw AppError.notFound('Meal plan not found.');
@@ -542,7 +542,7 @@ async function loadTree(db: ScopedDbClient, profileId: string, planId: string): 
 }
 
 /** Database refusals -> safe API errors (never the SQL message). */
-async function callWrite<T>(fn: () => Promise<T>): Promise<T> {
+export async function callWrite<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (err) {

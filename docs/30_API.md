@@ -590,3 +590,49 @@ No DELETE (cancel draft/planned items; replace confirmed ones); no actual-loggin
 **Extension points.** *Layer 8B:* link stable `planned_meal_item.id` ↔ actual `meal_item.id` in a new relation; neither record is rewritten. *Grocery (Layer 9):* current confirmed items expose Food identity + quantity/unit/serving, or `recipe_id` + exact `recipe_version_id` + servings (whose RecipeIngredients carry structured Food/quantity/unit), plus plan dates and the source planned meal/item.
 
 **Deferred.** Narrower confirmation endpoints; editing/moving planned meals and days (insert-only now); planned→actual linkage and adherence (8B+); AI generation/optimization/substitution; historical target snapshots; grocery lists.
+
+## 22. Phase 2 Layer 8B — Planned vs Actual / Plan Fulfillment (implemented)
+
+Explicit, user-asserted relationships between confirmed planned intent (§21) and actual consumption (§18). Only the relationship is stored; every fulfillment figure is **derived at read time** from stored snapshots. Neither the PlannedMealItem nor the MealItem is modified, nothing is deleted, and MealLog/MealItem, Food/FoodServing/FoodNutrient, recipes and EffectiveTargetSnapshots are never written (tested). No auto-matching, no AI, no adherence score or percentage, no Progress semantics. Migration: `20261005120000_planned_actual_links.sql`. Code: `api/src/domain/mealPlans/planFulfillment*.ts`. Data Model §3.6; Data Dictionary §36.
+
+**Endpoints** (under `/v1/profiles/{profile_id}/meal-plans`):
+
+| Method & path | Purpose |
+|---|---|
+| `POST /{plan}/items/{item}/actual-links` | `{ meal_item_id, relationship_type: "same_item" \| "substitution" }` → `201 { link, item_fulfillment }` |
+| `POST /{plan}/actual-links/{link}/revoke` | Revoke (never delete) → `200 { link, item_fulfillment }` |
+| `POST /{plan}/items/{item}/skip` | `{ reason? (≤ 500) }` → `201 { skip, item_fulfillment }` |
+| `POST /{plan}/items/{item}/unskip` | Revokes the active skip → `200 { skip, item_fulfillment }` |
+| `GET /{plan}/fulfillment` | Whole-plan fulfillment: per day, per current confirmed item, plus unplanned actual items |
+| `GET /{plan}/fulfillment/days/{plan_date}` | One plan-local date (inside the plan range, else `400`) |
+| `GET /{plan}/items/{item}/fulfillment` | One confirmed item (current or superseded) |
+
+**Link rules** (API pre-check with a precise error; the database trigger enforces the same, concurrency-safe):
+- Plan `active` or `completed` (retrospective linking allowed); `draft`/`cancelled`/`archived` → `409`. Historical links of an archived plan stay readable; revocation is also limited to active/completed plans.
+- Planned item confirmed and current (not superseded, not cancelled, not draft/planned) → else `409`; an item of another plan → `404`.
+- `meal_item_id` must be a MealItem of the same Profile (`400`, path `meal_item_id`), consumed and **active** (a superseded correction record → `409`).
+- **Same plan-local day:** the active MealItem's `consumed_at` converted to `MealPlan.local_timezone` must equal the plan day's date (`409`). `MealLog.logged_date`/`local_timezone` are not compared; `scheduled_local_time` is not a requirement; no ±1-day tolerance.
+- `same_item` needs the same Food or exact RecipeVersion; `substitution` needs a different one (`400`, path `relationship_type`).
+- A skipped item cannot be linked; an item with active links cannot be skipped (`409`).
+- A planned item may have several active links; the same consumption (any record of one 7A correction chain) links to a planned item at most once, and actively to at most **one current** planned item across all plans (`409`). Once a planned item is superseded (8A replacement), its actual can be linked to the replacement.
+
+**Derived fulfillment** (`rules_version: plan-fulfillment-8b.1`). For each current confirmed item, active links are resolved through the 7A correction chain to the active MealItem and re-checked: `link_state` = `valid`, `identity_changed_by_correction` (a correction changed Food/RecipeVersion so the stored relationship no longer matches), `consumed_date_changed_by_correction`, or `actual_not_active`. Valid links are counted once per active MealItem (`counted`). `fulfillment_state`, in precedence order:
+
+| State | When |
+|---|---|
+| `skipped` | an active skip |
+| `identity_changed_by_correction` | any active link whose relationship no longer matches the corrected record — relink or substitute explicitly; never auto-converted |
+| `fulfilled_with_substitution` | any counted `substitution` link (with a separate `same_item` breakdown when both exist) |
+| `fulfilled_exact` / `partial` / `above_planned_quantity` | counted `same_item` links whose summed quantity equals / is below / is above the planned quantity |
+| `quantity_not_comparable` | same_item quantities share no exact basis |
+| `unlinked` | no counted link |
+
+Quantity bases, first that all sides share: RecipeVersion servings; the declared amount (quantity in its unit, or servings × the serving's canonical amount — so 2 × 30 g slices = 60 g); the recorded normalized g/ml quantity; otherwise not comparable (never guessed; e.g. a 1-cup ml plan vs a gram log). Exact rational arithmetic, rounded at output.
+
+`breakdown` = `{ same_item: { link_count, actual_meal_item_ids, actual_amounts, actual_nutrition, quantity_comparison }, substitution: { link_count, actual_meal_item_ids, actual_amounts, actual_nutrition } }`. `nutrition_comparison` compares the **confirmed planned `nutrition_snapshot`** with the **active MealItems' `nutrition_snapshot`s** only (never recalculated; later Food or Recipe edits change nothing — tested): Layer 5C `summary` for each side with coverage, per-nutrient `planned_value`/`actual_value`/coverages, and `difference` (actual − planned) with `difference_status: actual_minus_planned` only when both sides are complete, else `null` with `not_comparable_incomplete_data`. The response carries `links`, `skip` and `history` (revoked links and skips).
+
+**Plan-level response:** `state_counts`, `days[]` (`items`, `state_counts`, `unplanned_actual_items`), `unplanned_actual_items` — active MealItems (current records of their correction chains only) whose plan-local date is in the plan range and which have no active link to a current planned item, labelled `classification: not_linked_to_current_planned_item` — `unplanned_actual_items_outside_planned_days`, `actual_items_linked_to_other_plans`, `historical_items` (superseded confirmed items that have link/skip history, `is_current: false`), `cancelled_item_ids`, `unconfirmed_current_item_ids`. Superseded items are never counted as current intent; cancelled items are never reported as skipped.
+
+**Authorization** (`33_Security_and_Privacy.md` §8.0/§9.1): read — full_management, view_only, pediatric_weight_management; write — full_management, pediatric_weight_management; view_only `403` on writes; revoked guardians and unrelated Accounts `404` (RLS returns no rows). Not broadened from Layers 7A/8A.
+
+**Deferred.** Automatic or AI matching; allocated quantities across links; adherence/Progress metrics; grocery.

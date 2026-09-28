@@ -155,8 +155,11 @@ This table is the deterministic input set for writing RLS policies in Phase 1 im
 | Entity | Owner | Access | Child-sensitive | Mutation |
 |---|---|---|---|---|
 | MealPlan / MealPlanDay / PlannedMeal / PlannedMealItem | owning Profile (denormalized `profile_id`, composite-FK enforced) | read: full_management, view_only, pediatric_weight_management; write: full_management, pediatric_weight_management | conditional | plan lifecycle by transition only; days/meals insert-only; items editable while draft/planned, immutable once confirmed (replacement only); no DELETE |
+| PlannedActualLink / PlannedMealItemSkip (Layer 8B) | owning Profile (composite FKs to both the PlannedMealItem and the MealItem, same `profile_id`) | read: full_management, view_only, pediatric_weight_management; write (create, revoke): full_management, pediatric_weight_management | conditional | insert + one-time revocation only (revoked rows immutable); actor ids forced to `auth.uid()`; no DELETE |
 
 Planned-item nutrition snapshots follow the same trust boundary as §8.1: server-computed at confirmation, **application-authoritative, not cryptographically attested**; the API never accepts a client snapshot.
+
+**Layer 8B (planned vs actual).** Links and skips store relationships only; the API accepts `meal_item_id`, `relationship_type` and an optional skip `reason` — never a fulfillment state, quantity or nutrition value. Their insert triggers are SECURITY DEFINER (search_path pinned, execute revoked from public) and check the caller's write scope on the row's Profile **before** reading any planned or actual row, so they cannot be used to probe another Profile; profile consistency is also enforced by composite FKs. Race-sensitive invariants (skip vs link, one actual chain → one current planned item) are serialized with transaction-scoped advisory locks. Fulfillment is derived from the stored planned and actual snapshots (§8.1 trust boundary applies to both). Read endpoints perform no writes.
 
 ### 8.1 Consumed nutrition snapshot trust boundary (Phase 2 Layer 7A)
 
@@ -203,6 +206,8 @@ For the authorized child Profile:
 ### 9.1 Future meal-plan / progress / grocery scope (MealPlan implemented in Phase 2 Layer 8A)
 
 **Layer 8A:** the MealPlan part of this scope is now implemented by `20261004120000_meal_planning_core.sql`: on `meal_plan`, `meal_plan_day`, `planned_meal`, `planned_meal_item` — SELECT for `full_management`, `view_only`, `pediatric_weight_management`; INSERT (and UPDATE on `meal_plan`/`planned_meal_item`) for `full_management` and `pediatric_weight_management`; no DELETE for anyone; direct owners resolve to `full_management`; revoked guardians and unrelated Accounts have no access. Nothing outside these four tables was broadened. Pediatric planning plans foods/recipes against existing targets only — no calorie formulas, deficits or advice. Plan adherence, nutrition adherence, goal progress and grocery remain future.
+
+**Layer 8B:** `planned_actual_link` and `planned_meal_item_skip` (`20261005120000_planned_actual_links.sql`) follow the same shape — SELECT for `full_management`, `view_only`, `pediatric_weight_management`; INSERT and UPDATE (revocation only, trigger-enforced) for `full_management` and `pediatric_weight_management`; no DELETE; revoked guardians and unrelated Accounts see no rows and cannot insert. A pediatric_weight_management guardian can link/skip the authorized child's confirmed planned items against the child's own actual MealItems only. 7A MealLog/MealItem and 8A planning policies are unchanged. Plan adherence (as a score/metric) remains future; 8B only reports factual fulfillment states.
 
 
 When those modules exist, this scope is intended to extend to the authorized child's: MealPlan (read/write), planned meals (read/write), plan adherence (read), nutrition adherence (read), goal progress (read), GroceryList (read/write when related to the child's meal plan), GroceryListItem (read/write). No such table exists in Phase 1 — this is recorded now so the eventual module inherits the right access shape rather than defaulting to `full_management`-equivalent or no access.
