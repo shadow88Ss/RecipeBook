@@ -42,6 +42,8 @@ import { createPlanFulfillmentRouter } from './domain/mealPlans/planFulfillment.
 import { PlanFulfillmentService } from './domain/mealPlans/planFulfillment.service';
 import { createGroceryListRouter, createPlanGroceryRouter } from './domain/groceries/grocery.routes';
 import { GroceryService } from './domain/groceries/grocery.service';
+import { createShoppingRouter } from './domain/groceries/shopping.routes';
+import { ShoppingService } from './domain/groceries/shopping.service';
 import type { ScopedDbFactory } from './lib/scopedDb';
 import type { Logger } from './lib/logger';
 import { AppError } from './lib/errors';
@@ -81,6 +83,7 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   const mealPlanService = new MealPlanService(scopedDbFactory, effectiveTargetService);
   const planFulfillmentService = new PlanFulfillmentService(scopedDbFactory);
   const groceryService = new GroceryService(scopedDbFactory);
+  const shoppingService = new ShoppingService(scopedDbFactory, groceryService);
 
   const v1 = express.Router();
   v1.use('/profiles', requireAuth, createProfileRouter(profileService));
@@ -102,6 +105,8 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   // Layer 9A — Grocery Planning (derived from current confirmed plan intent; immutable generations).
   v1.use('/profiles/:profile_id/meal-plans', requireAuth, createPlanGroceryRouter(groceryService));
   v1.use('/profiles/:profile_id/grocery-lists', requireAuth, createGroceryListRouter(groceryService));
+  // Layer 9B — user shopping state on a generated list (never modifies it).
+  v1.use('/profiles/:profile_id/grocery-lists', requireAuth, createShoppingRouter(shoppingService));
   v1.use('/profiles/:profile_id', requireAuth, createEffectiveTargetRouter(effectiveTargetService));
   // Layer 5A — global food reference data and deterministic conversion
   // (not profile-scoped; see food.service.ts).

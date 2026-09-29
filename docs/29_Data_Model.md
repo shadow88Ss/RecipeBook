@@ -100,6 +100,16 @@ Persistent, immutable **generated** grocery artifacts derived from a MealPlan (M
 - Relationships: `MealPlan 1..N GroceryList 1..N GroceryListItem 1..N GroceryListItemSource N..1 PlannedMealItem`; `GroceryList 0..1 → 0..1 GroceryList` (supersession chain). Composite `(id, profile_id)` keys keep every row, and every referenced plan row, in one Profile.
 - Lifecycle: generated in one transaction (new generation inserted, previous active superseded) or not at all; afterwards sealed — no update (except the one-time supersession) and no delete. User shopping state is **not** stored here (Layer 9B extension point: separate tables referencing GroceryList/GroceryListItem).
 
+### 3.8 Grocery workflow — user shopping state (Phase 2 Layer 9B)
+
+User shopping facts in four additive, Profile-owned tables, each bound to ONE GroceryList generation (composite FKs `(grocery_list_id, profile_id)` → GroceryList and `(grocery_list_item_id, grocery_list_id)` → GroceryListItem, so state can only target an item of its own generation). The 9A tables are unchanged apart from one added unique key `grocery_list_item (id, grocery_list_id)`.
+
+- `GroceryItemAlreadyHave` / `GroceryItemShoppingAdjustment`: a quantity + unit as entered, per generated item; at most one active each; setting a new value revokes the previous one.
+- `GroceryPurchase`: purchase events for a generated item or a manual item (exactly one target) — quantity + unit, or neither (a check-off); many active; corrections revoke.
+- `GroceryManualItem`: a user-added line on a generation — name, optional quantity + unit, optional Food, notes; removal revokes.
+- All: `created_at`/`created_by_account_id`, `revoked_at`/`revoked_by_account_id`; revocation is the only change; no delete. Need-to-buy, target, purchased, remaining and statuses are derived at read time, never stored.
+- Relationships: `GroceryList 1..N GroceryManualItem`; `GroceryListItem 1..N GroceryItemAlreadyHave / GroceryItemShoppingAdjustment / GroceryPurchase`; `GroceryManualItem 1..N GroceryPurchase`. No carry-forward between generations.
+
 ---
 
 ## 4. Effective Target Resolution
@@ -372,6 +382,7 @@ This table is not fully populated in this document; producing it is the immediat
 - New Phase 2 Layer 8A entities: `MealPlan`, `MealPlanDay`, `PlannedMeal`, `PlannedMealItem` (§3.5); `RecipeVersion` gains unique `(id, recipe_id)` as a composite FK target.
 - New Phase 2 Layer 8B entities: `PlannedActualLink`, `PlannedMealItemSkip` (§3.6); `PlannedMealItem` and `MealItem` each gain unique `(id, profile_id)` as composite FK targets (no column or behaviour change).
 - New Phase 2 Layer 9A entities: `GroceryList`, `GroceryListItem`, `GroceryListItemSource` (§3.7). No existing entity is modified.
+- New Phase 2 Layer 9B entities: `GroceryManualItem`, `GroceryItemAlreadyHave`, `GroceryItemShoppingAdjustment`, `GroceryPurchase` (§3.8); `GroceryListItem` gains unique `(id, grocery_list_id)` as a composite FK target (no column or behaviour change).
 - `MealItem` — `unit`, `nutrition_snapshot`, `nutrition_calculation_version`, `nutrition_calculated_at`; Food-vs-Recipe invariant; `(meal_log_id, profile_id)` FK; same-Profile recipe rule (Phase 2 Layer 7A).
 - `RecipeIngredient` — `food_serving_id` (nullable; must belong to the ingredient's Food; exclusive with `unit`) (Phase 2 Layer 6A). `Recipe.current_version_id` must reference a version of the same Recipe (trigger), and a new version with its ingredients/instructions is written atomically by `create_recipe_version()` (SECURITY INVOKER, existing RLS).
 

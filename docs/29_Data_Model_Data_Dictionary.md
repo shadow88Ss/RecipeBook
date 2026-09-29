@@ -702,3 +702,19 @@ Generated grocery requirements derived from a MealPlan's planned intent (`00_Mas
 
 **Derived (not stored)** — `is_stale` = the current source fingerprint (current, confirmed, non-skipped plan items + their RecipeVersions' ingredient facts, canonical JSON, SHA-256) differs from `source_fingerprint`. Reference-data changes (servings, density) do not make a list stale and never rewrite it.
 
+## 38. Grocery workflow — user shopping state (Phase 2 Layer 9B)
+
+User facts about shopping, kept separate from the generated requirement (§37). **PII:** no. **Health:** no (shopping facts). **Child-sensitive:** conditional (a child Profile's list). **Retention:** profile-active. **Deletion:** with Profile (no client DELETE; revocation only). **Export:** included. **Audit:** creator/revoker Account ids and times on each row (not exposed by the API). Access: `33_Security_and_Privacy.md` §8.0/§9.1. Migration: `20261007120000_grocery_shopping_state.sql`.
+
+Common to all four: `id` uuid PK · `profile_id` · `grocery_list_id` (composite FK `(grocery_list_id, profile_id)` → GroceryList) · `created_at` (server) · `created_by_account_id` (= `auth.uid()`, forced) · `revoked_at` / `revoked_by_account_id` (both null = active; set together, once, forced to server time and `auth.uid()`). Insert and revocation (triggers): caller holds a write scope; the list belongs to the Profile (`P0002`) and is the **active** generation of an `active` or `completed` plan (`grocery_shopping_list_writable`); revocation is the only permitted update and a revoked row is immutable. Quantities are stored as entered; `unit` is an exact Layer 5A unit code or `count` (API-validated; ambiguous household units are not accepted).
+
+**GroceryItemAlreadyHave** — `grocery_list_item_id` (composite FK `(grocery_list_item_id, grocery_list_id)` → GroceryListItem) · `quantity` numeric ≥ 0 · `unit` · `note` ≤ 500. At most one active per item (partial unique index); a new value revokes the previous one in the same statement.
+
+**GroceryItemShoppingAdjustment** — same shape: the quantity the user intends to buy for the item (overrides the generated-derived target while active; ≥ 0, 0 = buy none). At most one active per item; clearing revokes.
+
+**GroceryPurchase** — exactly one of `grocery_list_item_id` (composite FK → GroceryListItem of the same list) or `grocery_manual_item_id` (composite FK → GroceryManualItem of the same list) · `quantity` numeric > 0 + `unit`, or both null (a check-off) · `note`. Many active per target; not insertable for a removed manual item (`grocery_purchase_manual_item_active`).
+
+**GroceryManualItem** — `name` 1–200 · `quantity` > 0 + `unit`, or both null · `food_id` FK → Food, optional (intentional selection; the item stays manual — no GroceryListItemSource, no plan provenance) · `notes` ≤ 1000. Removal = revocation. Never used for nutrition.
+
+**Derived (not stored; rules `grocery-shopping-9b.1`)** — per generated item: `derived_need`, `already_have_surplus`, `shopping_target` + `shopping_target_source` (`generated` | `user_adjusted`), `purchased`, `remaining_to_purchase`, `over_purchased`, `status` (`need_to_buy`, `partially_purchased`, `purchased`, `already_have_sufficient`, `no_purchase_needed`, `comparison_unresolved`), `purchase_mode` (`quantity` | `check_off`). User quantities are normalized with Layer 5A into the item's base (`g`, `ml`, `count`); mass ↔ volume only through the Food's trusted density; count never converts; anything incomparable is listed and not counted.
+

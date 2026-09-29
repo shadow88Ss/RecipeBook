@@ -672,4 +672,45 @@ No PATCH/DELETE; no retailer, product, price, cart, pantry, check-off or manual-
 
 **Authorization** (`33_Security_and_Privacy.md` §8.0/§9.1): read (preview, lists) — full_management, view_only, pediatric_weight_management; generate — full_management, pediatric_weight_management; view_only `403` on generate; revoked guardians and unrelated Accounts `404`. Not broadened from 8A. Pediatric use is operational only (no advice, restriction logic or scoring).
 
-**Layer 9B extension point (not built).** Separate tables for already-have, purchased/checked state, manual grocery items, user-adjusted shopping quantities and carry-forward on regeneration will reference `grocery_list` / `grocery_list_item`; the immutable generated list stays the baseline those values are interpreted against. **Retailer boundary:** product mapping, prices, carts/checkout, barcode shopping and pantry inventory are later layers and will reference generated items by id, never modify them.
+**Layer 9B extension point (implemented — §24).** Separate tables for already-have, purchased/checked state, manual grocery items, user-adjusted shopping quantities and carry-forward on regeneration will reference `grocery_list` / `grocery_list_item`; the immutable generated list stays the baseline those values are interpreted against. **Retailer boundary:** product mapping, prices, carts/checkout, barcode shopping and pantry inventory are later layers and will reference generated items by id, never modify them.
+
+## 24. Phase 2 Layer 9B — Grocery Workflow & User Shopping State (implemented)
+
+Turns an immutable 9A generated GroceryList (§23) into a shopping workflow **without modifying it**. User facts (already-have, intended shopping quantity, purchases, manual items) are separate records bound to one list generation (Master §6.8; Data Model §3.8; Data Dictionary §38). Migration: `20261007120000_grocery_shopping_state.sql`. Code: `api/src/domain/groceries/shopping.*.ts`.
+
+**Endpoints** (under `/v1/profiles/{profile_id}/grocery-lists/{list}`); every write returns `{ …shopping view }`:
+
+| Method & path | Purpose |
+|---|---|
+| `GET /shopping` | The shopping view (read model below) |
+| `POST /items/{item}/already-have` | `{ quantity ≥ 0, unit, note? }` — sets (revokes any previous value) → `201` |
+| `POST /items/{item}/already-have/clear` | Revokes the active value → `200` (`409` if none) |
+| `POST /items/{item}/shopping-quantity` | `{ quantity ≥ 0, unit, note? }` — the amount you intend to buy → `201` |
+| `POST /items/{item}/shopping-quantity/clear` | Revokes it; the target returns to the generated-derived need → `200` |
+| `POST /items/{item}/purchases` | `{ quantity, unit, note? }`, or `{ note? }` alone (check-off) → `201` |
+| `POST /purchases/{purchase}/revoke` | Undo a purchase event → `200` |
+| `POST /manual-items` | `{ name, quantity?, unit?, food_id?, notes? }` (quantity and unit together) → `201` |
+| `POST /manual-items/{manual}/revoke` | Remove a manual item (kept as history) → `200` |
+| `POST /manual-items/{manual}/purchases` | As for items → `201` |
+
+`unit` = an exact Layer 5A unit code or `count`; ambiguous household units (`cup`, `tbsp`, …) are rejected (`400`). Generated quantities, sources, fingerprints, versions and plan provenance cannot be submitted (undeclared fields are stripped; the tables are not writable). No PATCH/DELETE; no retailer, cart or checkout endpoints.
+
+**Shopping view.** `grocery_list { id, meal_plan_id, generation_number, status, is_current_generation, superseded_by_grocery_list_id, is_stale, generated_at, plan_context, current_plan_status, calculation_version }`, `rules_version: grocery-shopping-9b.1`, `state_writable`, `carry_forward: "none"`, `summary` (status counts for generated and manual items), `items[]`, `manual_items[]`, `removed_manual_items[]`.
+
+Per generated item (every 9A item, including unresolved ones): `grocery_list_item_id`, `food`, `display_name`, `generation_resolution_status`, `generated_quantity { quantity, quantity_exact, unit }` (the immutable baseline, always shown), `already_have { id, input, normalized_quantity, normalized_unit, comparison, unresolved_reason, note, recorded_at }`, `derived_need`, `already_have_surplus`, `shopping_adjustment`, `shopping_target`, `shopping_target_source` (`generated` | `user_adjusted`), `purchased { quantity, unit, counted_purchase_ids, not_counted[], checked_off }`, `remaining_to_purchase`, `over_purchased`, `status`, `purchase_mode`, `history { already_have[], shopping_adjustments[], purchases[] }` (including revoked records). Manual items: `grocery_manual_item_id`, `source: "manual"`, `name`, `food`, `notes`, `input`, `shopping_target`, purchase fields, `status`, `purchase_mode`, `purchases[]`, `revoked_at`.
+
+**Rules** (exact rationals; output rounded half-up to 6 dp):
+- `derived_need = max(generated − already_have, 0)`; `already_have_surplus` when already-have exceeds it. Never negative.
+- `shopping_target` = the active adjustment (normalized to the item's base when the item has a generated quantity, else its own base), otherwise `derived_need`.
+- `purchased` = sum of active purchase events that normalize to the target's base; `remaining_to_purchase = max(target − purchased, 0)`; `over_purchased` when above. Events that do not normalize (count vs mass, mass vs volume without trusted density) and check-offs on a quantity target are listed in `not_counted`, never counted.
+- Normalization is Layer 5A only: unit factors; mass ↔ volume only through the Food's trusted (global-reference) density; count never converts; no second conversion engine.
+- `status`: `need_to_buy`, `partially_purchased`, `purchased`, `already_have_sufficient` (already-have covers the generated amount), `no_purchase_needed` (adjusted to 0), `comparison_unresolved` (an already-have/adjustment cannot be compared, or an unresolved requirement that has not been checked off).
+- `purchase_mode`: `quantity` when the item has (or should have) a comparable quantity — purchases need quantity + unit; `check_off` for a requirement with no quantity (unresolved 9A item without an adjustment, or a manual item without an amount) — purchases are plain check-offs (`400` for the wrong form). An unresolved requirement can be given a shopping quantity and then tracked by quantity; unresolved text is never converted into a Food.
+
+**Generations, staleness, carry-forward.** State belongs to the generation it was recorded on. A stale list (§23) keeps its state and stays writable while it is the current generation. Regeneration creates a clean generation — **nothing is carried forward** (no approved carry-forward policy); the previous generation keeps its state, readable, and becomes read-only (`409`; database `grocery_shopping_list_writable`). State is writable only on the current generation of an `active` or `completed` plan.
+
+**History.** Append + revoke: setting an already-have/adjustment revokes the previous value; clear, remove and purchase undo revoke; nothing is edited or deleted, so what was generated, what the user said they had, what they chose to buy, what they bought and what they added stays explainable.
+
+**Authorization** (`33_Security_and_Privacy.md` §8.0/§9.1): read — full_management, view_only, pediatric_weight_management; write — full_management, pediatric_weight_management; view_only `403` on writes; revoked guardians and unrelated Accounts `404`. 9A permissions unchanged.
+
+**Retailer boundary (not built).** Retailer, RetailerProduct, product matching, price, availability, cart, checkout/order and delivery will be separate records referencing `grocery_list_item` / `grocery_manual_item` ids; they must not add fields to the generated requirement or to these user-state tables' meaning. **Deferred:** carry-forward policy across generations, pantry inventory, barcode shopping, AI optimization/substitution.

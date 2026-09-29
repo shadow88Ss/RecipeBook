@@ -302,6 +302,16 @@ Grocery requirements are **derived deterministically from planned intent** — n
 - **Lifecycle:** a draft plan has a preview only (`unconfirmed_plan_preview`); an active plan has a preview and **persisted, immutable GroceryList generations** built from current *confirmed*, non-skipped items (unconfirmed items reported as excluded). Regeneration creates a new generation and supersedes the previous one atomically; nothing is edited or deleted. A list whose plan sources have changed is reported `is_stale`; it is not changed. Completed, cancelled and archived plans get no new preview or generation; their lists stay readable.
 - **Boundary:** a generated list contains generated requirements only. User shopping state (already-have, purchased, manual items, edited quantities, carry-forward on regeneration) belongs to Layer 9B in separate records that reference — never overwrite — the generated baseline. Retailer products, prices, carts, pantry inventory and AI optimization/substitution are out of scope until their own layers.
 
+## 6.8 Grocery workflow — user shopping state (Phase 2 Layer 9B)
+
+"What the plan requires" (9A, generated, immutable) and "what I actually need to buy / have bought" (9B, user facts) are **separate records**; a user action never changes a generated requirement.
+
+- **User facts, per GroceryList generation:** already-have quantity, an optional shopping-quantity adjustment (the amount the user intends to buy), purchase events (quantity, or a plain check-off for a requirement without a quantity), and manual items (food or non-food; a manual Food item stays manual — never plan provenance).
+- **Derived at read time (Layer 5A units, exact):** `derived_need = max(generated − already_have, 0)`, `shopping_target = adjustment or derived_need` (source `generated` / `user_adjusted`), `remaining = max(target − purchased, 0)`, with surplus/over-purchase reported factually and statuses `need_to_buy`, `partially_purchased`, `purchased`, `already_have_sufficient`, `no_purchase_needed`, `comparison_unresolved`. Incomparable quantities (count vs mass, mass vs volume without trusted density, unresolved requirements) are shown, never counted, never fabricated.
+- **History:** append + revoke only (setting a value revokes the previous one; clear/remove/undo revoke). Nothing is edited or deleted.
+- **Generations:** state belongs to the generation it was recorded on. It is **never carried forward**: a regenerated list starts clean; the previous generation keeps its state, read-only. State is writable only on the current generation of an active or completed plan.
+- **Out of scope:** retailers, products, prices, availability, carts, checkout, delivery, barcode shopping, pantry inventory, AI optimization/substitution.
+
 ---
 
 # 7. Account, Authentication, Profile, and Session Model

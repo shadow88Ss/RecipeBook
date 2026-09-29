@@ -277,7 +277,7 @@ async function loadRecipeVersions(db: ScopedDbClient, sources: readonly PlannedS
 
 /** Conversion reference data only (identity, density, servings) — grocery
  * derivation never reads nutrient data. */
-async function loadFoods(db: ScopedDbClient, foodIdList: readonly string[]): Promise<Map<string, GroceryFood>> {
+export async function loadFoods(db: ScopedDbClient, foodIdList: readonly string[]): Promise<Map<string, GroceryFood>> {
   const foodIds = [...new Set(foodIdList)];
   if (!foodIds.length) return new Map();
   const [foods, servings] = await Promise.all([
