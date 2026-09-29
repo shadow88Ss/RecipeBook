@@ -7,19 +7,24 @@
 //             (engine aggregateCoverage) -> Layer 5C summary.
 //             Never recalculated from Food/FoodServing/FoodNutrient/density
 //             or recipes.
-//   target  = the single EffectiveTargetResolver, and ONLY for the current
-//             local day. No EffectiveTargetSnapshot is tied to a local date,
-//             and target history cannot be re-resolved without a new policy,
-//             so a past day reports `historical_target_unavailable` rather
-//             than comparing with today's target.
+//   target  = Layer 10A target context for the requested local date:
+//             1. the day's `daily_tracking` EffectiveTargetSnapshot, if one
+//                was captured (first capture freezes the day — also TODAY:
+//                later target edits do not change a frozen day);
+//             2. otherwise, for the CURRENT local day only, the live
+//                EffectiveTargetResolver (`live_current_target`);
+//             3. otherwise `historical_target_unavailable` — never today's
+//                target, never reconstructed from target-row history.
+//             GET never captures a snapshot: viewing cannot freeze a day.
 //
 // Read scopes: every table read here (meal_log, meal_item, nutrition_target,
 // clinician_target, nutrient) is readable by full_management, view_only and
 // pediatric_weight_management under the existing RLS — never broadened.
 //
 // Queries per request: profile scope, meal_log, meal_item (one query for
-// the whole day), nutrient vocabulary, and — current day only — the
-// resolver's two target queries. No per-item queries.
+// the whole day), nutrient vocabulary, the day's daily snapshot lookup, and
+// — current day without a snapshot only — the resolver's two target
+// queries. No per-item queries.
 
 import { requireProfileScope } from '../../lib/authorize';
 import { AppError } from '../../lib/errors';
@@ -28,7 +33,7 @@ import type { ScopedDbFactory } from '../../lib/scopedDb';
 import type { AuthContext } from '../../types/express';
 import { CONVERSION_VERSION, ROUNDING_MODE } from '../conversion/conversion.engine';
 import { ZERO } from '../conversion/decimal';
-import type { EffectiveTargetService } from '../effectiveTarget/effectiveTarget.service';
+import { findDailySnapshot, IMPLEMENTED_SOURCES, RESOLVER_VERSION, type EffectiveTargetService } from '../effectiveTarget/effectiveTarget.service';
 import { MEAL_ITEM_COLUMNS, MEAL_LOG_COLUMNS, isActive, toMealItemDto, toMealNutritionDto, type MealItemRow, type MealLogRow } from '../meals/meal.dto';
 import { MEAL_READ_SCOPES } from '../meals/meal.service';
 import { MEAL_TYPES } from '../meals/meal.schemas';
@@ -85,9 +90,14 @@ export class DailyTrackerService {
     const actual = active.length ? aggregateSnapshots(active.map((i) => readSnapshot(i.nutrition_snapshot))) : noConsumption(vocabulary);
     const actualView = toAggregateDto(actual, active.length);
 
-    // Target: current local day only.
-    const resolvedTarget = isCurrentDay ? await this.targets.resolve(auth, profileId) : null;
+    // Target context (Layer 10A): frozen daily snapshot > live (today only) > unavailable.
+    const snapshot = await findDailySnapshot(db, profileId, query.date);
+    const live = !snapshot && isCurrentDay ? await this.targets.resolve(auth, profileId) : null;
+    const resolvedTarget = snapshot
+      ? { resolved: snapshot.snapshot_payload, unresolved_fields: snapshot.unresolved_fields ?? [], resolver_version: snapshot.resolver_version, resolved_at: snapshot.resolved_at, implemented_sources: snapshot.resolver_version === RESOLVER_VERSION ? [...IMPLEMENTED_SOURCES] : [] }
+      : live;
     const { mapped, unmapped } = resolvedTarget ? mapTargets(resolvedTarget.resolved, resolvedTarget.unresolved_fields, vocabulary) : { mapped: [], unmapped: [] };
+    const context = snapshot ? ('daily_snapshot' as const) : live ? ('live_current_target' as const) : ('historical_target_unavailable' as const);
     const actualById = new Map(actual.map((a) => [a.nutrient.id, a]));
 
     return {
@@ -108,15 +118,29 @@ export class DailyTrackerService {
       },
       target: resolvedTarget
         ? {
-            status: 'current' as const,
+            status: snapshot ? ('daily_snapshot' as const) : ('current' as const),
+            context,
+            daily_snapshot: snapshot
+              ? { id: snapshot.id, local_date: snapshot.local_date, local_timezone: snapshot.local_timezone, snapshot_reason: snapshot.snapshot_reason, captured_at: snapshot.created_at }
+              : null,
             resolver_version: resolvedTarget.resolver_version,
             resolved_at: resolvedTarget.resolved_at,
             implemented_sources: resolvedTarget.implemented_sources,
+            unresolved_fields: resolvedTarget.unresolved_fields,
             fields: Object.entries(resolvedTarget.resolved)
               .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
               .map(([field_name, f]) => ({ field_name, value: f.value, unit: f.unit, source: f.source, source_reference: f.source_reference })),
           }
-        : { status: 'historical_target_unavailable' as const, resolver_version: null, resolved_at: null, implemented_sources: [], fields: [] },
+        : {
+            status: 'historical_target_unavailable' as const,
+            context,
+            daily_snapshot: null,
+            resolver_version: null,
+            resolved_at: null,
+            implemented_sources: [],
+            unresolved_fields: [],
+            fields: [],
+          },
       comparison: {
         status: resolvedTarget ? ('available' as const) : ('historical_target_unavailable' as const),
         nutrients: mapped

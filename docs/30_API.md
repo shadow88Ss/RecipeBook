@@ -483,7 +483,7 @@ A **read model** answering "what did this Profile consume on this local calendar
 
 **Actual intake — snapshot-only.** MealLogs of the day → **active** consumed MealItems (`consumed`, not superseded; draft/planned/confirmed/skipped/cancelled and superseded originals never count) → their immutable Layer 7A `nutrition_snapshot`s → `aggregateSnapshots` (engine `aggregateCoverage`: nutrient-unit normalization, exact arithmetic, completeness) → one rounding at output → Layer 5C summary (`energy_kcal`, `protein_g`, `carbohydrate_g`, `fat_g`, `fiber_g`, each with value/null, coverage, status) plus every nutrient. Nothing is recalculated from Food, FoodServing, FoodNutrient, density or recipes: later reference-data changes or recipe edits leave a day unchanged (tested). A correction replaces its original in the totals (counted once). `actual.basis` is `recorded_snapshots`, or `no_consumption` for a day with no active items — then every nutrient is a **known zero** (`value: 0`, `is_zero: true`, `coverage: complete`), distinct from unknown data inside consumed items (which stays partial/unavailable, never 0). Viewing an empty day creates no rows.
 
-**Target — current day only.** The single EffectiveTargetResolver (`EffectiveTargetService.resolve`, sources `clinician_target` > `user_target`; no derived/TDEE/pediatric/wearable targets) is called for the **current local day only**; `target.fields[]` carries `field_name`, `value`, `unit`, `source`, `source_reference` (the target row id — no account ids). **Historical days return `target.status` and `comparison.status` = `historical_target_unavailable`** with no fields and no comparison: EffectiveTargetSnapshot has no local-date key and nothing yet creates day-applicable snapshots, so the target that applied on a past day cannot be determined reliably, and comparing past consumption with today's target is refused rather than guessed (see `29_Data_Model.md` §4.5).
+**Target context (amended by Layer 10A, §25).** The day's `daily_tracking` EffectiveTargetSnapshot if one was captured — for today as well (`target.status: daily_snapshot`, `target.context: daily_snapshot`, `target.daily_snapshot { id, local_date, local_timezone, snapshot_reason, captured_at }`); otherwise, for the **current local day only**, the single EffectiveTargetResolver (`status: current`, `context: live_current_target`; sources `clinician_target` > `user_target`; no derived/TDEE/pediatric/wearable targets); otherwise `historical_target_unavailable` with no fields and no comparison — never today's target, never reconstructed. `target.fields[]` carries `field_name`, `value`, `unit`, `source`, `source_reference` (the target row id — no account ids); `target.unresolved_fields[]` the resolver's (or the snapshot's) unresolved rows. The GET never creates a snapshot.
 
 **Target-to-nutrient mapping** (explicit, never guessed; *superseded by Layer 7C — see §20: targets are now canonical keys*). A resolved field is compared with a nutrient only if its `field_name` is a canonical nutrient key (Layer 5C: `protein`, `iron`, `vitamin_d`, …) and its unit converts exactly to that nutrient's reporting unit (g/mg/mcg; kcal only to kcal), or its `field_name` is a Layer 5C summary field (`energy_kcal`, `protein_g`, `carbohydrate_g`, `fat_g`, `fiber_g`) with exactly that field's unit. Anything else is listed in `comparison.unmapped_targets[]` with a reason: `unknown_field` (e.g. `calories`), `incompatible_unit` (e.g. carbohydrate in kcal, `energy_kcal` in kJ), `duplicate_target_for_nutrient` (e.g. both `fat` and `fat_g` — neither is compared), `invalid_value`. Target field names remain free-form at write time (§13); an approved target-field vocabulary is still outstanding.
 
@@ -505,7 +505,7 @@ A **read model** answering "what did this Profile consume on this local calendar
 ```
 { profile_id, date, timezone, is_current_day, meal_count, active_item_count,
   actual: { basis: recorded_snapshots|no_consumption, precision, conversion_version, summary, item_count, coverage_summary, nutrients[] },
-  target: { status: current|historical_target_unavailable, resolver_version, resolved_at, implemented_sources, fields[] },
+  target: { status: current|daily_snapshot|historical_target_unavailable, context: live_current_target|daily_snapshot|historical_target_unavailable, daily_snapshot, resolver_version, resolved_at, implemented_sources, unresolved_fields[], fields[] },
   comparison: { status: available|historical_target_unavailable, nutrients[], unmapped_targets[] },
   meal_groups: [{ meal_type, meals: [{ id, meal_type, logged_date, local_timezone, notes, created_at,
                                        active_item_count, items: [active item DTOs, §18], nutrition: { summary, item_count, coverage_summary } }] }] }
@@ -714,3 +714,34 @@ Per generated item (every 9A item, including unresolved ones): `grocery_list_ite
 **Authorization** (`33_Security_and_Privacy.md` §8.0/§9.1): read — full_management, view_only, pediatric_weight_management; write — full_management, pediatric_weight_management; view_only `403` on writes; revoked guardians and unrelated Accounts `404`. 9A permissions unchanged.
 
 **Retailer boundary (not built).** Retailer, RetailerProduct, product matching, price, availability, cart, checkout/order and delivery will be separate records referencing `grocery_list_item` / `grocery_manual_item` ids; they must not add fields to the generated requirement or to these user-state tables' meaning. **Deferred:** carry-forward policy across generations, pantry inventory, barcode shopping, AI optimization/substitution.
+
+## 25. Phase 3 Layer 10A — Historical Target Context & Snapshot Policy (implemented)
+
+Historical TARGET truth for a Profile-local calendar day (Master §8.3; Data Model §4.5; Data Dictionary §11). One target context per Profile + local date, captured explicitly and frozen; no adherence, progress, formulas or recommendations. Migrations: `20261008120000_daily_target_snapshot_reason.sql` (enum value, separate because a new enum value cannot be used in its own transaction) and `20261008120100_daily_target_snapshots.sql`. Code: `api/src/domain/effectiveTarget/`, `api/src/domain/dailyTracker/dailyTracker.service.ts`.
+
+**Endpoints** (under `/v1/profiles/{profile_id}`):
+
+| Method & path | Purpose |
+|---|---|
+| `POST /target-snapshots` | `{ local_date, timezone }` → `201 { created: true, snapshot }` for the first capture of that Profile/date, `200 { created: false, snapshot }` for any later/retried/concurrent capture of the same date (whatever the time zone) |
+| `GET /target-snapshots?from=&to=&cursor=&limit=` | Daily snapshots, newest date first |
+| `GET /target-snapshots/daily/{local_date}` | `{ local_date, context: daily_snapshot, snapshot }` or `{ local_date, context: historical_target_unavailable, snapshot: null }` |
+| `GET /effective-target-snapshots` | (Layer 4B) every snapshot; rows now include `local_date`, `local_timezone`, `unresolved_fields` |
+
+No PATCH/DELETE. The client supplies only the day context; target values, provenance, resolver version, unresolved fields, payload and reason are server-controlled (undeclared fields stripped).
+
+**Capture rules.** Write scope (owner / full_management). `timezone` must be an IANA identifier; `local_date` must equal the current date in it — past and future dates are `400` (the database refuses them too: `effective_target_snapshot_current_local_date`). The server calls the single `EffectiveTargetResolver` (no second precedence implementation) and stores its canonical-key output, per-field provenance (`source`, `source_reference`; mixed clinician/user sources preserved), `resolver_version`, `resolved_at` and `unresolved_fields`, with `snapshot_reason: daily_tracking`, `local_date`, `local_timezone`. Uniqueness `(profile_id, local_date)` is enforced by a partial unique index; a concurrent loser returns the winner's snapshot. The first capture also freezes the time zone recorded for that day.
+
+**Snapshot DTO:** `id, profile_id, local_date, local_timezone, snapshot_reason, resolver_version, resolved_at, captured_at, fields[{ field_name, value, unit, source, source_reference }], unresolved_fields[{ field_name, source, source_reference, reason }]`. No actor ids.
+
+**Semantics.**
+- *Frozen day:* once captured, a day's target context never changes; a target edited later that day changes the live resolver (`GET /effective-target`) immediately, and applies to a later day when that day is captured. No time-segment targets.
+- *Daily Tracker (§19):* snapshot → `daily_snapshot` (today too); no snapshot + today → `live_current_target`; no snapshot + past → `historical_target_unavailable`. GET writes nothing, so viewing cannot freeze a day.
+- *"No snapshot" vs "field unavailable":* `context: historical_target_unavailable` means no target context exists for the date; a snapshot without a field (or listing it in `unresolved_fields`) means the context exists but that field had no usable target at capture.
+- *Legacy days:* no retroactive reconstruction from target-row history (which instant would represent the day would be a guess); they stay `historical_target_unavailable`.
+- *Orchestration:* nothing captures automatically (meal logging is unchanged); an official client should call the idempotent capture when establishing today's tracking context.
+
+**Authorization** (`33_Security_and_Privacy.md` §8.0/§9): capture — owner, full_management; read — full_management, view_only, pediatric_weight_management; `view_only`/`pediatric_weight_management` capture `403`; revoked guardians and unrelated Accounts `404`. Pediatric snapshot creation stays denied (existing RLS, unchanged); a child Profile whose only manager is a pediatric guardian therefore accumulates no historical target context.
+
+**Progress/adherence extension point (not built).** Layer 10B can join a date's actual totals (Daily Tracker snapshot-derived) with `GET /target-snapshots/daily/{date}` (or the list) to compare actual vs historical target per day, without re-resolving targets.
+

@@ -11,6 +11,8 @@
 // absence means "no data" instead of "not yet resolvable by this phase".
 
 import { z } from 'zod';
+import { paginationQuerySchema } from '../../lib/pagination';
+import { localDateSchema, timeZoneSchema } from '../meals/meal.schemas';
 
 export const resolvedFieldSourceSchema = z.enum(['safety_rule', 'clinician_target', 'user_target', 'profile_derived']);
 
@@ -54,9 +56,28 @@ export const snapshotDtoSchema = z.object({
     'coach_recommendation_issued',
     'user_requested_export',
     'manual_audit',
+    'daily_tracking',
   ]),
   linked_event_type: z.enum(['consumed_meal', 'daily_summary_finalized', 'coach_recommendation', 'other_auditable_decision']).nullable(),
   linked_event_id: z.uuid().nullable(),
   created_at: z.iso.datetime({ offset: true }),
+  /** Layer 10A — daily_tracking snapshots only (null otherwise). */
+  local_date: z.string().nullable(),
+  local_timezone: z.string().nullable(),
+  unresolved_fields: z.array(unresolvedTargetFieldSchema).nullable(),
 });
 export type SnapshotDto = z.infer<typeof snapshotDtoSchema>;
+
+/** Layer 10A — explicit daily target capture. Only the day context is
+ * accepted; values, provenance, resolver version, unresolved fields,
+ * payload and reason are server-controlled (undeclared fields stripped). */
+export const dailySnapshotCaptureSchema = z.object({
+  local_date: localDateSchema,
+  timezone: timeZoneSchema,
+});
+export type DailySnapshotCaptureInput = z.infer<typeof dailySnapshotCaptureSchema>;
+
+export const dailySnapshotListQuerySchema = paginationQuerySchema
+  .extend({ from: localDateSchema.optional(), to: localDateSchema.optional() })
+  .refine((q) => q.from === undefined || q.to === undefined || q.from <= q.to, { message: 'from must not be after to.', path: ['from'] });
+export type DailySnapshotListQuery = z.infer<typeof dailySnapshotListQuerySchema>;

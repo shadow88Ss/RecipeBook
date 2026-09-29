@@ -408,6 +408,18 @@ The effective target response MUST identify the provenance of each material targ
 
 The AI coach consumes the resolved effective target. It does not independently decide precedence.
 
+## 8.3 Historical target context (Phase 3 Layer 10A)
+
+The **current effective target** (the resolver, now) and a **historical target** (what applied on a past local day) are different things; historical consumption is never compared with today's target.
+
+- **One target context per Profile + local calendar date.** An explicit, idempotent capture (`POST /v1/profiles/{profile_id}/target-snapshots`, `{ local_date, timezone }`) stores the resolver's output as an immutable `EffectiveTargetSnapshot` with reason `daily_tracking`. The **first** successful capture freezes that day's target context and its time zone; retries, concurrent captures and captures in another zone for the same date return the same snapshot.
+- **Capture only for the current local date** (in the given IANA zone): the resolver answers "what is effective now", never "what was effective then". Past and future dates are refused.
+- **Target changes during a day** do not change a frozen day: the live resolver reflects the change at once, and the new value becomes a later day's context when that day is captured. There are no intraday target segments.
+- **Daily Tracker:** a day with a daily snapshot uses it (today too); today without one uses the live resolver (`live_current_target`); a past day without one is `historical_target_unavailable`. Viewing never captures.
+- **No retroactive reconstruction:** days before capture existed, or never captured, stay `historical_target_unavailable` — target-row history is not used to guess a day's target.
+- **Who captures:** owners and `full_management`; `view_only` and `pediatric_weight_management` read only (unchanged approved scope). A child Profile with no owner/full_management actor capturing will have no historical target for those days.
+- Progress/adherence (later layers) must read historical targets from these snapshots, never recompute them.
+
 ---
 
 # 9. Clinician-Defined Targets

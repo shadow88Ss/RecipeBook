@@ -237,12 +237,16 @@ Constraint: at most one row with `is_active = true` per `(profile_id, field_name
 | snapshot_payload | jsonb | not null | — | — | system_computed | must match `EffectiveTargetResolver` output shape (`29_Data_Model.md` §4.1) | no | field-by-field value + source + source_reference |
 | resolver_version | text | not null | — | — | system_computed | — | no | — |
 | resolved_at | timestamp | not null | — | — | system_computed | — | no | — |
-| snapshot_reason | enum(`meal_consumed`,`daily_summary_finalized`,`coach_recommendation_issued`,`user_requested_export`,`manual_audit`) | not null | — | — | system_computed | fixed set | no | — |
+| snapshot_reason | enum(`meal_consumed`,`daily_summary_finalized`,`coach_recommendation_issued`,`user_requested_export`,`manual_audit`,`daily_tracking`) | not null | — | — | system_computed | fixed set | no | `daily_tracking` added by Layer 10A — the one target context of a Profile-local day |
 | linked_event_type | enum(`consumed_meal`,`daily_summary_finalized`,`coach_recommendation`,`other_auditable_decision`) | nullable | null | — | system_computed | — | no | null when not anchored to one row |
 | linked_event_id | uuid | nullable | null | — | system_computed | required if `linked_event_type` set | no | — |
-| created_at | timestamp | not null | now() | — | system_computed | — | no | — |
+| created_at | timestamp | not null | now() | — | system_computed | forced to now() by trigger | no | exposed as `captured_at` for daily snapshots |
+| local_date | date | nullable | null | unique with profile_id where reason = `daily_tracking` | client context (validated) | required for `daily_tracking`; must equal the current date in `local_timezone` at insert (trigger `effective_target_snapshot_current_local_date`) | no | Layer 10A — the Profile-local calendar day the target context applies to |
+| local_timezone | text | nullable | null | — | client context (validated) | IANA identifier (API); recognised by PostgreSQL (trigger); paired with `local_date` | no | Layer 10A — frozen with the day's first capture |
+| unresolved_fields | jsonb (array) | nullable | null | — | system_computed | required for `daily_tracking`; the resolver's `unresolved_fields` (`field_name`, `source`, `source_reference`, `reason`) | no | Layer 10A — distinguishes "field unresolved at capture" from "no target for the field" |
+| created_by_account_id | uuid | nullable | — | FK → Account | system_computed | forced to `auth.uid()` by trigger | no | Layer 10A; not exposed by the API |
 
-Row is write-once; no update path exists for any field after insert (Master §8, approved design).
+Row is write-once; no update path exists for any field after insert (Master §8, approved design). **Layer 10A daily semantics:** at most one `daily_tracking` snapshot per `(profile_id, local_date)` (partial unique index `uq_effective_target_snapshot_daily`); the first capture freezes the day's target and time zone; `daily_tracking` rows carry no linked event (`effective_target_snapshot_daily_context`). Only the current local date can be captured; no retroactive reconstruction.
 
 ---
 

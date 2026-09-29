@@ -41,6 +41,15 @@ function assertSafeColumnList(columns: string): void {
   }
 }
 
+/** PostgREST receives insert/update values as a JSON body, so a JS array
+ * written to a column is a JSON array (jsonb). node-postgres would instead
+ * send it as a PostgreSQL array literal; JSON-encode it to match the
+ * production client. (No write path in this codebase sends a native SQL
+ * array column value.) */
+function asBodyValue(value: unknown): unknown {
+  return Array.isArray(value) ? JSON.stringify(value) : value;
+}
+
 class PgHarnessScopedDbClient implements ScopedDbClient {
   constructor(
     private readonly pool: Pool,
@@ -103,7 +112,7 @@ class PgHarnessScopedDbClient implements ScopedDbClient {
       keys.forEach(assertSafeIdentifier);
       const placeholders = keys.map((_, i) => `$${i + 1}`);
       const sql = `insert into ${table} (${keys.join(', ')}) values (${placeholders.join(', ')}) returning ${returningColumns}`;
-      const { rows } = await client.query(sql, Object.values(values));
+      const { rows } = await client.query(sql, Object.values(values).map(asBodyValue));
       return rows[0] as T;
     });
   }
@@ -116,7 +125,7 @@ class PgHarnessScopedDbClient implements ScopedDbClient {
       const setKeys = Object.keys(values);
       setKeys.forEach(assertSafeIdentifier);
       const setClauses = setKeys.map((k) => {
-        params.push(values[k]);
+        params.push(asBodyValue(values[k]));
         return `${k} = $${params.length}`;
       });
       const whereClauses = Object.entries(eq).map(([k, v]) => {

@@ -154,9 +154,9 @@ Fields:
 
 No screen, module, or AI prompt computes an effective target independently. All consumers (Daily Tracker, Adaptive Nutrition Coach, Meal Planning, Analytics) call the single resolver.
 
-### 4.5 Historical target applicability (gap recorded by Layer 7B)
+### 4.5 Historical target context — daily snapshots (Phase 3 Layer 10A; resolves the Layer 7B gap)
 
-`EffectiveTargetSnapshot` has no Profile-local date and nothing currently creates a snapshot per day or per consumed meal, so the target that applied on an arbitrary past local day cannot be determined reliably. The Daily Tracker (`30_API.md` §19) therefore compares against the resolver only for the current local day and reports `historical_target_unavailable` for past days — it never compares past consumption with today's target. Enabling historical comparison requires an approved snapshot policy (e.g. which event creates a day-applicable snapshot, which snapshot applies when targets change mid-day, and who may create it given that `pediatric_weight_management`/`view_only` cannot insert snapshots).
+`EffectiveTargetSnapshot` gains `local_date`, `local_timezone` (IANA), `unresolved_fields` and `created_by_account_id`, and the reason `daily_tracking`. A `daily_tracking` snapshot is the **one immutable target context for a Profile + local calendar date**: unique on `(profile_id, local_date)`; the first successful capture freezes the day (and its time zone); it can only be created for the current local date in its zone (API and database); its content is the single resolver's output (canonical 7C keys and units, field-level provenance incl. mixed clinician/user sources, resolver version, `resolved_at`) plus the resolver's unresolved fields. Target rows are append-only (supersession, no update/delete), but historical days are **not** reconstructed from them — a date without a daily snapshot has no historical target. The Daily Tracker uses the day's snapshot (today too), the live resolver only for today without one, and `historical_target_unavailable` otherwise. Capture: owners/full_management; view_only and pediatric_weight_management read only.
 
 ---
 
@@ -383,6 +383,7 @@ This table is not fully populated in this document; producing it is the immediat
 - New Phase 2 Layer 8B entities: `PlannedActualLink`, `PlannedMealItemSkip` (§3.6); `PlannedMealItem` and `MealItem` each gain unique `(id, profile_id)` as composite FK targets (no column or behaviour change).
 - New Phase 2 Layer 9A entities: `GroceryList`, `GroceryListItem`, `GroceryListItemSource` (§3.7). No existing entity is modified.
 - New Phase 2 Layer 9B entities: `GroceryManualItem`, `GroceryItemAlreadyHave`, `GroceryItemShoppingAdjustment`, `GroceryPurchase` (§3.8); `GroceryListItem` gains unique `(id, grocery_list_id)` as a composite FK target (no column or behaviour change).
+- `EffectiveTargetSnapshot` — `local_date`, `local_timezone`, `unresolved_fields`, `created_by_account_id` (all nullable; required for reason `daily_tracking`), reason `daily_tracking`, unique daily index (Phase 3 Layer 10A, §4.5).
 - `MealItem` — `unit`, `nutrition_snapshot`, `nutrition_calculation_version`, `nutrition_calculated_at`; Food-vs-Recipe invariant; `(meal_log_id, profile_id)` FK; same-Profile recipe rule (Phase 2 Layer 7A).
 - `RecipeIngredient` — `food_serving_id` (nullable; must belong to the ingredient's Food; exclusive with `unit`) (Phase 2 Layer 6A). `Recipe.current_version_id` must reference a version of the same Recipe (trigger), and a new version with its ingredients/instructions is written atomically by `create_recipe_version()` (SECURITY INVOKER, existing RLS).
 
