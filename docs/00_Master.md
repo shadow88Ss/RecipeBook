@@ -420,6 +420,16 @@ The **current effective target** (the resolver, now) and a **historical target**
 - **Who captures:** owners and `full_management`; `view_only` and `pediatric_weight_management` read only (unchanged approved scope). A child Profile with no owner/full_management actor capturing will have no historical target for those days.
 - Progress/adherence (later layers) must read historical targets from these snapshots, never recompute them.
 
+## 8.4 Progress & Adherence — three separate factual dimensions (Phase 3 Layer 10B)
+
+Progress analytics are **read models** over historical truth owned elsewhere; they write nothing and create no second source of meal, target, plan or weight data. Three dimensions are always reported separately and **never combined into a score** (no health/diet/wellness/success/compliance score):
+
+1. **Plan fulfillment** — counts of Layer 8B derived fulfillment states for current confirmed planned items in the range, plus unplanned actual items (factual, not "noncompliance"). A fulfilled-item **rate is not reported** until it is approved which states count as fulfilled.
+2. **Nutrition target adherence** — per local date: actual intake from immutable MealItem snapshots vs **that date's Layer 10A daily target snapshot only**. Dates without one are `target_context_unavailable` and excluded from target comparisons. `percentage_of_target = actual / target × 100` only for a complete actual and a positive target (never clamped); partial actuals give lower bounds; unavailable actuals are never zero; days with no logged consumption are not treated as zero intake. There is no approved tolerance, so no "met target" judgement.
+3. **Goal / measurement progress** — WeightMeasurement history ordered by `measured_at`, corrections resolved (a record corrected twice is a conflict and excluded, never guessed), first/latest/change; active weight Goals with a target weight are compared with the latest measurement. The Goal model has no start value, so **no percent-to-goal**; `goal_type` is reported as stored without success/failure interpretation.
+
+For child Profiles the same factual output applies — no weight-loss success, deficit, compliance, growth or BMI-percentile interpretation. No predictions, estimated goal dates, formulas or AI.
+
 ---
 
 # 9. Clinician-Defined Targets

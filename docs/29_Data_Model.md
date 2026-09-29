@@ -160,6 +160,12 @@ No screen, module, or AI prompt computes an effective target independently. All 
 
 ---
 
+### 4.6 Progress & Adherence read model (Phase 3 Layer 10B)
+
+No new entities and no schema change. Progress (`30_API.md` §26) derives three independent views from existing records: Layer 8B fulfillment (PlanFulfillment read model over PlannedMealItem, PlannedActualLink, PlannedMealItemSkip, MealItem), nutrition adherence (MealLog/MealItem snapshots × `daily_tracking` EffectiveTargetSnapshot per local date) and measurement progress (WeightMeasurement correction chains, Goal). Active WeightMeasurement = a row no other row corrects; if two rows correct the same row, the branch is reported as conflicting and excluded. Goal has `goal_type` (loss/maintenance/gain/…) and optional `target_weight_kg` but no start value — percent-to-goal is not derivable.
+
+---
+
 ## 5. Clinician-Defined Targets
 
 `ClinicianTarget` gains the following fields to satisfy Master §9's provenance requirement:

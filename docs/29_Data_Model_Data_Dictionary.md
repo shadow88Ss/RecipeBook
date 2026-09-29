@@ -219,7 +219,7 @@ Constraint: at most one row with `is_active = true` per `(profile_id, field_name
 | value_kg | numeric | not null | — | — | user_entered / synced_external / guardian_entered | positive, plausible range | no (correction only) | — |
 | source | enum(`user_entered`,`wearable_synced`,`clinician_entered`) | not null | — | — | system_computed | fixed set | no | — |
 | provenance_reference | uuid | nullable | — | — | system_computed | e.g. `WearableConnection.id` when `source = wearable_synced` | no | — |
-| corrects_measurement_id | uuid | nullable | null | self-FK → WeightMeasurement | system_computed | — | no | correction pattern, mirrors `MealItem` |
+| corrects_measurement_id | uuid | nullable | null | self-FK → WeightMeasurement | system_computed | — | no | correction pattern, mirrors `MealItem`. Layer 10B reading rule: the active measurement is the row no other row corrects; nothing prevents two rows correcting the same row, and such a branch is treated as a conflict (all its rows excluded from progress), never resolved by picking one |
 | created_at | timestamp | not null | now() | — | system_computed | — | no | — |
 
 ---
