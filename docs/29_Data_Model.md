@@ -90,6 +90,16 @@ Two additive, Profile-owned relationship records; `PlannedMealItem` (8A) and `Me
 - Relationships: `PlannedMealItem 1..N PlannedActualLink N..1 MealItem`; `PlannedMealItem 1..N PlannedMealItemSkip` (at most one active).
 - Derived fulfillment states: `unlinked`, `partial`, `fulfilled_exact`, `above_planned_quantity`, `fulfilled_with_substitution`, `skipped`, `quantity_not_comparable`, `identity_changed_by_correction` — computed from the confirmed planned `nutrition_snapshot` and the active actual snapshots only. No adherence score.
 
+### 3.7 Grocery Planning (Phase 2 Layer 9A)
+
+Persistent, immutable **generated** grocery artifacts derived from a MealPlan (Master §6.7). Three additive, Profile-owned tables; MealPlan, PlannedMealItem, links/skips, MealLog/MealItem, recipes and Food reference data are not modified.
+
+- `GroceryList`: one **generation** of a plan's grocery requirements — `generation_number` 1..n per MealPlan, `status` `active | superseded` (exactly one active per plan), `supersedes_grocery_list_id` / `superseded_by_grocery_list_id`, the plan context at generation (status, date range, `local_timezone`), the **source fingerprint** and rule versions (`grocery-calculation-9a.1`, `grocery-source-fingerprint-9a.1`, `conversion-5a.1`), and the current plan items that were excluded (unconfirmed, pending replacement, skipped).
+- `GroceryListItem`: a generated requirement — canonical Food (or none, for an unresolved Food), `dimension` `mass | volume | count` with its base unit `g | ml | count`, exact and rounded quantity, `resolution_status` (`resolved`, `incompatible_units`, `unresolved_quantity`, `ambiguous_unit`, `unresolved_conversion`, `unresolved_food`) and `aggregation_status`.
+- `GroceryListItemSource`: traceability — one row per contributing planned Food item or scaled RecipeIngredient: MealPlan, MealPlanDay, PlannedMeal, PlannedMealItem, plan date, Food/serving, Recipe + exact RecipeVersion + RecipeIngredient, the stored amount, planned servings, yield, exact scale factor, scaled quantity, the contribution in the item's unit and the Layer 5A conversion steps/provenance.
+- Relationships: `MealPlan 1..N GroceryList 1..N GroceryListItem 1..N GroceryListItemSource N..1 PlannedMealItem`; `GroceryList 0..1 → 0..1 GroceryList` (supersession chain). Composite `(id, profile_id)` keys keep every row, and every referenced plan row, in one Profile.
+- Lifecycle: generated in one transaction (new generation inserted, previous active superseded) or not at all; afterwards sealed — no update (except the one-time supersession) and no delete. User shopping state is **not** stored here (Layer 9B extension point: separate tables referencing GroceryList/GroceryListItem).
+
 ---
 
 ## 4. Effective Target Resolution
@@ -361,6 +371,7 @@ This table is not fully populated in this document; producing it is the immediat
 - `MealLog` — `local_timezone` (IANA), `notes` (Phase 2 Layer 7A).
 - New Phase 2 Layer 8A entities: `MealPlan`, `MealPlanDay`, `PlannedMeal`, `PlannedMealItem` (§3.5); `RecipeVersion` gains unique `(id, recipe_id)` as a composite FK target.
 - New Phase 2 Layer 8B entities: `PlannedActualLink`, `PlannedMealItemSkip` (§3.6); `PlannedMealItem` and `MealItem` each gain unique `(id, profile_id)` as composite FK targets (no column or behaviour change).
+- New Phase 2 Layer 9A entities: `GroceryList`, `GroceryListItem`, `GroceryListItemSource` (§3.7). No existing entity is modified.
 - `MealItem` — `unit`, `nutrition_snapshot`, `nutrition_calculation_version`, `nutrition_calculated_at`; Food-vs-Recipe invariant; `(meal_log_id, profile_id)` FK; same-Profile recipe rule (Phase 2 Layer 7A).
 - `RecipeIngredient` — `food_serving_id` (nullable; must belong to the ingredient's Food; exclusive with `unit`) (Phase 2 Layer 6A). `Recipe.current_version_id` must reference a version of the same Recipe (trigger), and a new version with its ingredients/instructions is written atomically by `create_recipe_version()` (SECURITY INVOKER, existing RLS).
 

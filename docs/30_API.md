@@ -636,3 +636,40 @@ Quantity bases, first that all sides share: RecipeVersion servings; the declared
 **Authorization** (`33_Security_and_Privacy.md` §8.0/§9.1): read — full_management, view_only, pediatric_weight_management; write — full_management, pediatric_weight_management; view_only `403` on writes; revoked guardians and unrelated Accounts `404` (RLS returns no rows). Not broadened from Layers 7A/8A.
 
 **Deferred.** Automatic or AI matching; allocated quantities across links; adherence/Progress metrics; grocery.
+
+## 23. Phase 2 Layer 9A — Grocery Planning Core (implemented)
+
+Deterministic grocery requirements derived from a MealPlan's **planned intent** (Master §6.7; Data Model §3.7; Data Dictionary §37). One engine — `deriveGroceryRequirements()` (`api/src/domain/groceries/grocery.engine.ts`) — serves both the preview and persisted generation. No nutrition values, Daily Tracker data, actual MealItems or adherence are read; no AI. Migration: `20261006120000_grocery_planning_core.sql`. Code: `api/src/domain/groceries/`.
+
+**Endpoints:**
+
+| Method & path | Purpose |
+|---|---|
+| `GET /v1/profiles/{profile_id}/meal-plans/{plan}/grocery-preview` | Live derivation, nothing persisted. Draft plan → `preview_type: unconfirmed_plan_preview` (current draft/planned intent, `includes_unconfirmed`); active plan → `active_plan_preview` (confirmed-only, exactly what generation would store, plus `current_grocery_list { id, generation_number, is_stale }`); other states `409` |
+| `POST /v1/profiles/{profile_id}/meal-plans/{plan}/grocery-lists` | Generate a new immutable generation from an **active** plan → `201` list detail. No body: any submitted items/quantities/fingerprints are stripped and ignored. Draft/completed/cancelled/archived `409`; nothing confirmed and non-skipped `400` |
+| `GET /v1/profiles/{profile_id}/meal-plans/{plan}/grocery-lists` | That plan's generations, newest first (`?status=&cursor=&limit=`) |
+| `GET /v1/profiles/{profile_id}/grocery-lists` | All of the Profile's lists (`?meal_plan_id=&status=active|superseded&cursor=&limit=`) |
+| `GET /v1/profiles/{profile_id}/grocery-lists/{list}` | One generation with items, sources and staleness |
+
+No PATCH/DELETE; no retailer, product, price, cart, pantry, check-off or manual-item endpoints.
+
+**Contributing items.** Preview of a draft plan: current items (draft/planned). Active-plan preview and generation: current **confirmed** items that are not actively skipped. Never: cancelled, superseded, pending (unconfirmed) replacements. Current items that do not contribute are returned in `excluded_unconfirmed_sources` (reasons `unconfirmed`, `pending_replacement_not_confirmed`) and `excluded_skipped_sources`.
+
+**Derivation** (`calculation_version: grocery-calculation-9a.1`):
+- *Direct Food:* `quantity` × `unit` (Layer 5A registry) or `quantity` × FoodServing canonical amount (e.g. 4 × 30 g slice = 120 g). A serving that is not global reference authority, missing, or unusable → `unresolved_conversion`.
+- *Recipe:* the exact `recipe_version_id` on the planned item (never `Recipe.current_version_id`); every RecipeIngredient × `planned servings ÷ yield` (e.g. 600 g × 2/4 = 300 g), exact rationals, no intermediate rounding.
+- *Ingredient identity:* a Food only when `match_status = matched` with a readable Food; `needs_confirmation` / `unmatched` / missing Food → `unresolved_food` keeping text, amount and source. Quantity-only ("2 slices bread") → `count`; no quantity → `unresolved_quantity`; a legacy ambiguous unit (`cup`, `tbsp`, …) → `ambiguous_unit` with the candidates.
+- *Aggregation:* canonical Food id + dimension only (never names). Bases `g`, `ml`, `count`. mass + volume of one Food merge into `g` only via that Food's trusted (global-reference) density; otherwise both components are returned as `incompatible_units` with a reason. `count` never merges with mass/volume. Different Food ids never merge.
+- *Output:* `quantity` rounded half-up to 6 dp, with `quantity_exact` ("n/d"). Items are ordered by Food name, Food id, dimension, then unresolved requirements in plan order. Base units are storage/calculation units; display units (e.g. 1.5 kg) are a client concern.
+
+**Item DTO:** `{ id?, position, food { food_id, canonical_name } | null, display_name, dimension, quantity, quantity_exact, unit, resolution_status, aggregation_status, unresolved_reason, source_count, sources[] }`. **Source DTO:** `{ position, source_type (planned_food | recipe_ingredient), meal_plan_id, meal_plan_day_id, planned_meal_id, planned_meal_item_id, plan_date, meal_type, food_id, food_serving_id, recipe_id, recipe_version_id, recipe_ingredient_id, ingredient_text, ingredient_match_status, source_quantity, source_unit, planned_servings, recipe_yield, scale_factor_exact, scaled_quantity(_exact), contribution_quantity(_exact), contribution_unit, conversion { steps, provenance }, unresolved_reason }`. `summary`: item / resolved / incompatible / unresolved counts, source lines, contributing planned items, direct-Food and recipe-ingredient sources, RecipeVersions.
+
+**List DTO:** `id, profile_id, meal_plan_id, generation_number, status (active | superseded), is_current_generation, supersedes_grocery_list_id, superseded_by_grocery_list_id, superseded_at, generated_at, plan_context { status_at_generation, start_date, end_date, local_timezone }, current_plan_status, calculation_version, conversion_version, fingerprint_version, generated_source_fingerprint, current_source_fingerprint, is_stale, excluded_unconfirmed_sources, excluded_skipped_sources, summary, items`.
+
+**Generations and staleness.** Generation runs `generate_grocery_list()` in one transaction: insert the list (the trigger numbers it, copies the plan context, supersedes the previous active generation), its items and sources — all or nothing; a failure leaves the previous active list active. Generated lists are never edited. `is_stale` compares the list's `source_fingerprint` with the fingerprint of what a generation would use now (`grocery-source-fingerprint-9a.1`: SHA-256 of canonical JSON of the contributing items' ids, day/meal, Food/serving/unit/quantity or Recipe/exact RecipeVersion/servings, and each referenced RecipeVersion's yield and ingredient ids/Food/match status/serving/quantity/unit — membership encodes confirmed/current/skip state). A skip, a confirmed replacement or a new confirmed item makes a list stale; a Recipe edit (new current version), a reference-data change (serving weight, density) or display text does not. Stale is informational — regeneration is explicit.
+
+**Reference-data drift.** The preview uses current reference data; a persisted list keeps the quantities, statuses, traceability and versions computed at generation (tested with a changed FoodServing).
+
+**Authorization** (`33_Security_and_Privacy.md` §8.0/§9.1): read (preview, lists) — full_management, view_only, pediatric_weight_management; generate — full_management, pediatric_weight_management; view_only `403` on generate; revoked guardians and unrelated Accounts `404`. Not broadened from 8A. Pediatric use is operational only (no advice, restriction logic or scoring).
+
+**Layer 9B extension point (not built).** Separate tables for already-have, purchased/checked state, manual grocery items, user-adjusted shopping quantities and carry-forward on regeneration will reference `grocery_list` / `grocery_list_item`; the immutable generated list stays the baseline those values are interpreted against. **Retailer boundary:** product mapping, prices, carts/checkout, barcode shopping and pantry inventory are later layers and will reference generated items by id, never modify them.

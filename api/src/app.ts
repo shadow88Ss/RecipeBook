@@ -40,6 +40,8 @@ import { createMealPlanRouter } from './domain/mealPlans/mealPlan.routes';
 import { MealPlanService } from './domain/mealPlans/mealPlan.service';
 import { createPlanFulfillmentRouter } from './domain/mealPlans/planFulfillment.routes';
 import { PlanFulfillmentService } from './domain/mealPlans/planFulfillment.service';
+import { createGroceryListRouter, createPlanGroceryRouter } from './domain/groceries/grocery.routes';
+import { GroceryService } from './domain/groceries/grocery.service';
 import type { ScopedDbFactory } from './lib/scopedDb';
 import type { Logger } from './lib/logger';
 import { AppError } from './lib/errors';
@@ -78,6 +80,7 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   const dailyTrackerService = new DailyTrackerService(scopedDbFactory, effectiveTargetService);
   const mealPlanService = new MealPlanService(scopedDbFactory, effectiveTargetService);
   const planFulfillmentService = new PlanFulfillmentService(scopedDbFactory);
+  const groceryService = new GroceryService(scopedDbFactory);
 
   const v1 = express.Router();
   v1.use('/profiles', requireAuth, createProfileRouter(profileService));
@@ -96,6 +99,9 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   v1.use('/profiles/:profile_id/meal-plans', requireAuth, createMealPlanRouter(mealPlanService));
   // Layer 8B — planned vs actual: explicit links/skips; fulfillment derived at read time.
   v1.use('/profiles/:profile_id/meal-plans', requireAuth, createPlanFulfillmentRouter(planFulfillmentService));
+  // Layer 9A — Grocery Planning (derived from current confirmed plan intent; immutable generations).
+  v1.use('/profiles/:profile_id/meal-plans', requireAuth, createPlanGroceryRouter(groceryService));
+  v1.use('/profiles/:profile_id/grocery-lists', requireAuth, createGroceryListRouter(groceryService));
   v1.use('/profiles/:profile_id', requireAuth, createEffectiveTargetRouter(effectiveTargetService));
   // Layer 5A — global food reference data and deterministic conversion
   // (not profile-scoped; see food.service.ts).

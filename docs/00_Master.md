@@ -293,6 +293,15 @@ The lifecycle above is realized by **two separate domains**, never by one row mo
 
 A PlannedMealItem never becomes `consumed`; consumption is recorded only as a MealItem. The link between a planned item and the actual MealItem(s) that fulfil it is defined by a later layer (8B) without changing either record. The `draft/planned/confirmed/skipped/cancelled` values remain in the MealItem status enum for compatibility but are not used by the official actual-logging API.
 
+## 6.7 Grocery Planning — generated requirements (Phase 2 Layer 9A)
+
+Grocery requirements are **derived deterministically from planned intent** — never from nutrition values, the Daily Tracker, actual consumption or adherence, and never by AI:
+
+- **Source:** a MealPlan's current planned items — a direct Food amount, or the exact RecipeVersion stored on the PlannedMealItem (never `Recipe.current_version_id`) expanded into its structured RecipeIngredients and scaled by `planned servings ÷ yield`. Cancelled, superseded, pending-replacement and actively skipped items do not contribute.
+- **Normalization and aggregation:** Layer 5A exact conversion into the canonical grocery bases `g`, `ml`, `count`; aggregation only by canonical Food id + compatible dimension (mass + volume only through the Food's trusted density; count never with mass/volume). Anything that cannot be reconciled or resolved is kept as an explicit unresolved requirement — never dropped, never guessed.
+- **Lifecycle:** a draft plan has a preview only (`unconfirmed_plan_preview`); an active plan has a preview and **persisted, immutable GroceryList generations** built from current *confirmed*, non-skipped items (unconfirmed items reported as excluded). Regeneration creates a new generation and supersedes the previous one atomically; nothing is edited or deleted. A list whose plan sources have changed is reported `is_stale`; it is not changed. Completed, cancelled and archived plans get no new preview or generation; their lists stay readable.
+- **Boundary:** a generated list contains generated requirements only. User shopping state (already-have, purchased, manual items, edited quantities, carry-forward on regeneration) belongs to Layer 9B in separate records that reference — never overwrite — the generated baseline. Retailer products, prices, carts, pantry inventory and AI optimization/substitution are out of scope until their own layers.
+
 ---
 
 # 7. Account, Authentication, Profile, and Session Model
