@@ -730,6 +730,16 @@ The UI/coach must be capable of explaining uncertainty where appropriate.
 - **Identity** providers stay under Supabase Auth; the registry may record them but cannot enable or replace them.
 - **Routing, health, failures.** Internal sources (e.g. the Product catalog) come first, then enabled providers by configured priority. Failures map to `authentication_failed`, `rate_limited`, `timeout`, `provider_unavailable`, `invalid_provider_response`, `capability_not_supported`; authentication and invalid-request failures are never retried as temporary. All admin changes are audited through AuditEvent. Admin operational views show aggregates only (e.g. number of active/failing user connections), never user meals, weights, sleep or nutrition.
 
+## 17.2 External product data providers (Phase 3 Layer 11D)
+
+- **First real adapters: FatSecret and Open Food Facts**, both `product_data`, plugged into the 11C registry, routing and admin API with no provider-specific path in Food, Product, Nutrition, Meal, Grocery or Progress.
+- **Internal first.** Barcode lookup normalizes the code with Layer 11A, returns the internal Product when an active Barcode exists, and only otherwise asks enabled external providers in configured priority order (sequentially, never a parallel fan-out).
+- **External results are candidates.** An `ExternalProductCandidate` is what a provider said at a time: it is never a Product, ProductLabelVersion, ProductNutrient, ProductServing, Barcode or Food, nothing is written to reference tables, and it cannot be logged as a meal. Its authority is `external_candidate`, distinct from the manufacturer-label authority of ProductLabelVersion. A future, explicit confirmation/ingestion workflow decides when a candidate becomes canonical Product data: candidate → user/admin confirmation → trusted normalization/ingestion → Product → ProductLabelVersion → ProductNutrient/ProductServing → Barcode → loggable.
+- **No merging.** When several providers answer, their candidates stay separate; disagreements (brand, name, package, serving, core nutrients) are reported, never averaged or combined.
+- **Nutrient mapping** only through each adapter's explicit field table to Layer 5C canonical keys; everything else is kept as unmapped with a reason. Energy is the provider's stated kcal only (no 4/4/9, no kJ conversion); a stated 0 is a known zero and an omitted value stays missing.
+- **Storage/licensing boundary** per provider: FatSecret allows only listed identifiers (here `food_id`, `serving_id`) to be stored indefinitely and everything else for at most 24 hours; Open Food Facts data is ODbL/DbCL and needs attribution, with share-alike for derivative databases. In this layer nothing from either provider is persisted — only a bounded in-memory cache of normalized candidates (TTL capped by the provider policy) — and raw payloads are never retained or returned. Whether ingestion may store Open Food Facts-derived rows is an open licence decision for that future layer.
+- **Hardening of 11C.** The runtime routing function no longer returns secret-reference names; adapters declare where their credential lives, and admin views show only whether a credential is attached/configured.
+
 ---
 
 # 18. Error and Confidence Model

@@ -8,14 +8,18 @@
 // platform_admin, so this check is the UX layer and RLS is the final word.
 //
 // Secrets: only references are stored; values are resolved in-process for an
-// adapter call and never returned, logged or persisted. Health/test results
+// adapter call and never returned, logged or persisted. Since Layer 11D the
+// adapter declares its credential references and a row's secret_reference
+// must equal that declaration; admin DTOs show only whether a credential is
+// attached/configured, never the reference name. Health/test results
 // are mapped to the internal failure model — raw provider errors never
 // reach a response or a log.
 
 import { AppError } from '../../lib/errors';
 import type { ScopedDbClient, ScopedDbFactory } from '../../lib/scopedDb';
 import type { AuthContext } from '../../types/express';
-import type { AdapterContext, AdapterDefinition, AdapterRegistry } from './adapters';
+import type { AdapterDefinition, AdapterRegistry } from './adapters';
+import { callWithTimeout, createAdapterContext, credentialConfigured } from './execution';
 import {
   credentialRequired,
   FAMILY_CAPABILITIES,
@@ -34,7 +38,6 @@ import type { ProviderPatchInput, ProviderRegisterInput, RoutingQuery } from './
 import { ProviderRouter } from './routing';
 import type { SecretResolver } from './secrets';
 
-export const DEFAULT_TEST_TIMEOUT_MS = 5000;
 
 interface ProviderRow {
   id: string;
@@ -176,8 +179,12 @@ export class IntegrationService {
         } else configuration = parsed.data as Record<string, unknown>;
       }
     }
-    if (input.secret_reference !== undefined && input.secret_reference !== null && !credentialRequired(provider.credential_model)) {
-      issues.push({ path: 'secret_reference', message: `A ${provider.credential_model} provider takes no platform secret.` });
+    if (input.secret_reference !== undefined && input.secret_reference !== null) {
+      if (!credentialRequired(provider.credential_model)) {
+        issues.push({ path: 'secret_reference', message: `A ${provider.credential_model} provider takes no platform secret.` });
+      } else if (definition?.credential && input.secret_reference !== definition.credential.reference) {
+        issues.push({ path: 'secret_reference', message: 'This adapter reads its credential from a different reference.', reason: 'secret_reference_not_declared_by_adapter' });
+      }
     }
     for (const [i, c] of (input.capabilities ?? []).entries()) {
       if (!isFamilyCapability(provider.provider_family, c.capability)) {
@@ -196,7 +203,7 @@ export class IntegrationService {
         if (c.enabled === false) enabledCapabilities.delete(c.capability);
         else enabledCapabilities.add(c.capability);
       }
-      const blockers = this.enableBlockers(provider, definition, configuration, secretReference, enabledCapabilities);
+      const blockers = this.enableBlockers(provider, definition, configuration, secretReference !== null, enabledCapabilities);
       if (blockers.length) throw AppError.conflict('This provider cannot be enabled yet.', { reason: 'provider_not_ready', blockers });
     }
 
@@ -215,7 +222,7 @@ export class IntegrationService {
   }
 
   /** Runs the adapter's own probe (if it has one) and records the result. */
-  async testConnection(auth: AuthContext, key: string) {
+  async testConnection(auth: AuthContext, key: string, requestId?: string) {
     const db = await this.admin(auth);
     const provider = await loadProvider(db, key);
     const definition = this.options.registry.get(provider.provider_key);
@@ -226,16 +233,29 @@ export class IntegrationService {
       throw AppError.conflict('No adapter is implemented for this provider.', { reason: 'adapter_not_available' });
     }
     if (!definition.testConnection) throw AppError.conflict('This adapter has no connection test.', { reason: 'test_not_supported' });
-    if (credentialRequired(provider.credential_model) && !this.credentialConfigured(provider.secret_reference)) {
+    if (credentialRequired(provider.credential_model) && !credentialConfigured(definition, provider.secret_reference !== null, this.options.secrets)) {
       throw AppError.conflict('The platform credential is not configured.', { reason: 'credential_not_configured' });
     }
     const parsed = definition.configSchema.safeParse(provider.configuration ?? {});
     if (!parsed.success) throw AppError.conflict('The stored configuration is not valid for this adapter.', { reason: 'invalid_configuration' });
 
-    const ctx = this.context(provider.provider_key, provider.environment, parsed.data, provider.secret_reference);
+    const test = definition.testConnection.bind(definition);
     let failure: IntegrationFailure | null = null;
     try {
-      await withTimeout(definition.testConnection(ctx), ctx.timeoutMs);
+      await callWithTimeout(
+        (signal) =>
+          createAdapterContext({
+            definition,
+            providerKey: provider.provider_key,
+            environment: provider.environment,
+            configuration: parsed.data,
+            credentialAttached: provider.secret_reference !== null,
+            secrets: this.options.secrets,
+            signal,
+            requestId: requestId ?? null,
+          }),
+        test,
+      );
     } catch (err) {
       failure = toIntegrationFailure(err);
     }
@@ -285,11 +305,11 @@ export class IntegrationService {
     return db;
   }
 
-  private credentialConfigured(reference: string | null): boolean {
-    return reference !== null && this.options.secrets.isConfigured(reference);
+  private credentialConfigured(p: ProviderRow): boolean {
+    return credentialConfigured(this.options.registry.get(p.provider_key), p.secret_reference !== null, this.options.secrets);
   }
 
-  private enableBlockers(provider: ProviderRow, definition: AdapterDefinition | undefined, configuration: unknown, secretReference: string | null, capabilities: Set<string>): string[] {
+  private enableBlockers(provider: ProviderRow, definition: AdapterDefinition | undefined, configuration: unknown, credentialAttached: boolean, capabilities: Set<string>): string[] {
     const blockers: string[] = [];
     if (provider.provider_family === 'identity') blockers.push('identity_managed_by_supabase_auth');
     if (!definition) blockers.push('adapter_not_available');
@@ -298,31 +318,17 @@ export class IntegrationService {
       if (!definition.configSchema.safeParse(configuration ?? {}).success) blockers.push('invalid_configuration');
       if (![...capabilities].some((c) => definition.capabilities.includes(c))) blockers.push('no_supported_capability_enabled');
     }
-    if (credentialRequired(provider.credential_model) && !this.credentialConfigured(secretReference)) blockers.push('credential_not_configured');
+    if (credentialRequired(provider.credential_model)) {
+      if (definition && !definition.credential) blockers.push('adapter_declares_no_credential');
+      else if (!credentialConfigured(definition, credentialAttached, this.options.secrets)) blockers.push('credential_not_configured');
+    }
     return blockers;
-  }
-
-  private context(providerKey: string, environment: ProviderEnvironment, configuration: unknown, reference: string | null): AdapterContext {
-    const configured = configuration as { request_timeout_ms?: unknown };
-    const timeoutMs = typeof configured?.request_timeout_ms === 'number' ? Math.min(Math.max(configured.request_timeout_ms, 1), 30_000) : DEFAULT_TEST_TIMEOUT_MS;
-    const secrets = this.options.secrets;
-    return {
-      provider_key: providerKey,
-      environment,
-      configuration,
-      timeoutMs,
-      secret: async () => {
-        const value = reference ? secrets.resolve(reference) : null;
-        if (value === null) throw new IntegrationFailure('authentication_failed');
-        return value;
-      },
-    };
   }
 
   private healthDto(p: ProviderRow) {
     return {
       enabled: p.enabled,
-      credential_configured: credentialRequired(p.credential_model) ? this.credentialConfigured(p.secret_reference) : null,
+      credential_configured: credentialRequired(p.credential_model) ? this.credentialConfigured(p) : null,
       health: {
         status: p.health_status,
         failure_code: p.health_failure_code,
@@ -354,9 +360,9 @@ export class IntegrationService {
         })),
       credential: {
         required: credentialRequired(p.credential_model),
-        // The reference NAME only (e.g. env:FATSECRET_CLIENT_SECRET) — never its value.
-        secret_reference: p.secret_reference,
-        configured: credentialRequired(p.credential_model) ? this.credentialConfigured(p.secret_reference) : null,
+        // Neither the secret nor its reference name is returned (Layer 11D).
+        attached: p.secret_reference !== null,
+        configured: credentialRequired(p.credential_model) ? this.credentialConfigured(p) : null,
       },
       adapter: {
         available: adapterMatches,
@@ -368,20 +374,6 @@ export class IntegrationService {
       created_at: p.created_at,
       updated_at: p.updated_at,
     };
-  }
-}
-
-async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new IntegrationFailure('timeout')), ms);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
   }
 }
 

@@ -21,7 +21,10 @@ export interface ExternalRoute {
   priority: number;
   environment: ProviderEnvironment;
   configuration: unknown;
-  secret_reference: string | null;
+  /** Whether a platform credential is attached to the registry row. The
+   * reference itself is never read here (Layer 11D): the adapter declares
+   * where its credential lives. */
+  credential_attached: boolean;
   definition: AdapterDefinition;
 }
 export type Route = { kind: 'internal'; key: string } | ExternalRoute;
@@ -43,7 +46,7 @@ interface RouteRow {
   priority: number;
   environment: ProviderEnvironment;
   configuration: unknown;
-  secret_reference: string | null;
+  credential_attached: boolean;
 }
 
 export class ProviderRouter {
@@ -69,7 +72,7 @@ export class ProviderRouter {
           priority: Number(row.priority),
           environment: row.environment,
           configuration: definition.configSchema.parse(row.configuration ?? {}),
-          secret_reference: row.secret_reference,
+          credential_attached: row.credential_attached === true,
           definition,
         });
       }

@@ -3,7 +3,7 @@
 // and no barcode reassignment endpoint: reference data is written only by
 // trusted ingestion (product.service.ts). Every route requires auth.
 
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import { AppError } from '../../lib/errors';
 import { validate } from '../../middleware/validate';
 import type { BarcodeType } from './barcode';
@@ -18,7 +18,7 @@ import {
 } from './product.schemas';
 import type { ProductService } from './product.service';
 
-export function createProductRouter(service: ProductService): Router {
+export function createProductRouter(service: ProductService, barcodeLookup?: RequestHandler[]): Router {
   const router = Router();
 
   router.get('/', validate({ query: productSearchQuerySchema }), async (req, res, next) => {
@@ -29,6 +29,9 @@ export function createProductRouter(service: ProductService): Router {
       next(err);
     }
   });
+
+  // Layer 11D — internal-first lookup with external candidates as fallback.
+  if (barcodeLookup) router.get('/barcode/:code/lookup', ...barcodeLookup);
 
   // before /:product_id so "barcode" is never read as an id
   router.get('/barcode/:code', validate({ params: barcodeParamSchema, query: barcodeQuerySchema }), async (req, res, next) => {

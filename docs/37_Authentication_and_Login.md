@@ -149,3 +149,7 @@ This contract is a requirement for whichever future phase builds the mobile proj
 ## 14. Platform administration and identity providers (Phase 3 Layer 11C)
 
 Platform administrators authenticate exactly like every other user — through Supabase Auth; there is no second authentication system, admin password or admin token. Authorization then follows Account → PlatformRoleAssignment (`platform_admin`) → administration APIs (`30_API.md` §29). Supabase Auth remains the only identity/token authority: Google Sign-In and Sign in with Apple are recorded in the integration registry (`identity` family, `connection_model: supabase_auth`) only as administrative definitions — they cannot be enabled, tested or routed there, and their availability and credentials are configured in Supabase Auth (§12).
+
+## 15. Provider platform credentials (Phase 3 Layer 11D)
+
+FatSecret's OAuth 2.0 **client-credentials** grant is a server-to-server platform credential, not user authentication: it never involves a user, a Supabase session or the mobile app. The client id/secret are deployment secrets resolved by the API; the resulting access token is held in API memory only. Open Food Facts reads need no credential (an identifying User-Agent only). Users calling the external-product endpoints authenticate with their normal Supabase session; no provider identity is created or linked for them.

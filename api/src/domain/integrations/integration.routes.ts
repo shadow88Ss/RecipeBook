@@ -42,7 +42,7 @@ export function createIntegrationAdminRouter(service: IntegrationService): Route
     validate({ params: providerKeyParamSchema, body: providerPatchSchema }),
     handle(200, (auth, p, req) => service.update(auth, p.provider_key, req.body as ProviderPatchInput)),
   );
-  router.post('/:provider_key/test', validate({ params: providerKeyParamSchema }), handle(200, (auth, p) => service.testConnection(auth, p.provider_key)));
+  router.post('/:provider_key/test', validate({ params: providerKeyParamSchema }), handle(200, (auth, p, req) => service.testConnection(auth, p.provider_key, req.requestId)));
   router.get('/:provider_key/health', validate({ params: providerKeyParamSchema }), handle(200, (auth, p) => service.health(auth, p.provider_key)));
   router.get('/:provider_key/audit', validate({ params: providerKeyParamSchema }), handle(200, (auth, p) => service.audit(auth, p.provider_key)));
   return router;

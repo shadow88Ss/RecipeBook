@@ -16,6 +16,9 @@
 
 import type { z } from 'zod';
 import { FAMILY_CAPABILITIES, type FamilyCapability, type ProviderEnvironment, type ProviderFamily } from './integration.model';
+import type { ExternalProductCandidate, ProviderStoragePolicy } from './productData';
+import { createFatSecretDefinition } from './providers/fatsecret';
+import { createOpenFoodFactsDefinition } from './providers/openFoodFacts';
 
 /** What an adapter receives for one call. The secret is resolved lazily,
  * server-side, and must never be logged or returned. */
@@ -23,33 +26,34 @@ export interface AdapterContext<C = unknown> {
   provider_key: string;
   environment: ProviderEnvironment;
   configuration: C;
-  /** Resolves the platform credential (throws authentication_failed if absent). */
-  secret(): Promise<string>;
+  /** Resolves the platform credential, or one named part of it (e.g.
+   * `client_id`), from the adapter's declared references. Throws
+   * authentication_failed when it is not configured. */
+  secret(part?: string): Promise<string>;
   timeoutMs: number;
+  /** Aborted when the call times out; adapters pass it to every request. */
+  signal: AbortSignal;
+  /** The MyRecipeBook request id, for provider-safe correlation logging. */
+  requestId: string | null;
 }
 
 // ---------------- product_data ----------------
-export interface ExternalProductCandidate {
-  external_id: string;
-  gtin: string | null;
-  brand_name: string | null;
-  product_name: string;
-  market: string | null;
-}
-export interface ExternalNutritionCandidate {
-  external_id: string;
-  basis_quantity: number;
-  basis_unit: 'g' | 'ml';
-  nutrients: Array<{ provider_nutrient: string; amount: number; unit: string }>;
+// Candidates only (Layer 11D, productData.ts): never Product/Food rows.
+export interface ProductSearchRequest {
+  query: string;
+  limit: number;
 }
 export interface ProductDataAdapter<C = unknown> {
   family: 'product_data';
-  searchFoods?(ctx: AdapterContext<C>, query: string): Promise<ExternalProductCandidate[]>;
-  searchProducts?(ctx: AdapterContext<C>, query: string): Promise<ExternalProductCandidate[]>;
-  /** `gtin` is the canonical GTIN-14 from Layer 11A normalization. */
+  /** The provider's storage/caching/attribution boundary. */
+  storagePolicy?: ProviderStoragePolicy;
+  searchFoods?(ctx: AdapterContext<C>, request: ProductSearchRequest): Promise<ExternalProductCandidate[]>;
+  searchProducts?(ctx: AdapterContext<C>, request: ProductSearchRequest): Promise<ExternalProductCandidate[]>;
+  /** `gtin` is the canonical GTIN-14 from Layer 11A normalization; null
+   * means the provider has no product for it. */
   lookupBarcode?(ctx: AdapterContext<C>, gtin: string): Promise<ExternalProductCandidate | null>;
-  fetchProduct?(ctx: AdapterContext<C>, externalId: string): Promise<ExternalProductCandidate | null>;
-  fetchNutrition?(ctx: AdapterContext<C>, externalId: string): Promise<ExternalNutritionCandidate | null>;
+  /** Full candidate (servings + nutrition) for the provider's own id. */
+  fetchNutrition?(ctx: AdapterContext<C>, externalId: string): Promise<ExternalProductCandidate | null>;
 }
 
 // ---------------- wearable (user-authorized) ----------------
@@ -126,6 +130,14 @@ export interface AdapterDefinition<C = unknown> {
   /** Strict schema for the provider's NON-SECRET configuration. */
   configSchema: z.ZodType<C>;
   adapter: FamilyAdapter;
+  /**
+   * Where the platform credential lives, declared by the adapter (deployment
+   * configuration, Layer 11D). The registry row's secret_reference must equal
+   * `reference`; runtime resolution uses this declaration, so the reference
+   * name never has to travel through a database function that ordinary
+   * users can call. `parts` names companion values (e.g. an OAuth client id).
+   */
+  credential?: { reference: string; parts?: Readonly<Record<string, string>> };
   /** Cheap authenticated probe, if the provider has one. */
   testConnection?(ctx: AdapterContext<C>): Promise<void>;
 }
@@ -180,8 +192,21 @@ export class AdapterRegistry {
   }
 }
 
-/** Production registry: the internal Product catalog only. No external
- * adapter is implemented yet, so no external provider can be enabled. */
-export function createDefaultAdapterRegistry(): AdapterRegistry {
-  return new AdapterRegistry().registerInternal({ key: 'internal_product_catalog', family: 'product_data', capabilities: ['product_search', 'barcode_lookup', 'nutrition_lookup'] });
+export interface DefaultRegistryOptions {
+  /** HTTP transport for provider calls (tests inject deterministic fixtures). */
+  fetch?: typeof fetch;
+  now?: () => Date;
+}
+
+/** Production registry: the internal Product catalog plus the Layer 11D
+ * product-data adapters (FatSecret, Open Food Facts). An adapter being
+ * registered makes nothing callable: its registry row must still be
+ * configured and enabled by a platform_admin. */
+export function createDefaultAdapterRegistry(options: DefaultRegistryOptions = {}): AdapterRegistry {
+  const transport = options.fetch ?? ((input, init) => fetch(input, init));
+  const now = options.now ?? (() => new Date());
+  return new AdapterRegistry()
+    .registerInternal({ key: 'internal_product_catalog', family: 'product_data', capabilities: ['product_search', 'barcode_lookup', 'nutrition_lookup'] })
+    .register(createFatSecretDefinition({ fetch: transport, now }))
+    .register(createOpenFoodFactsDefinition({ fetch: transport, now }));
 }

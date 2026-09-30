@@ -1,6 +1,8 @@
 // Layer 11C integration tests — platform administration and the provider
 // framework, against the real migration chain and RLS harness. Every
-// adapter here is a FAKE test adapter: nothing calls an external API.
+// adapter here is a FAKE test adapter: nothing calls an external API. The
+// registry here deliberately has no Layer 11D adapters, so the seeded
+// FatSecret/Open Food Facts rows still act as "no adapter" providers.
 
 import { Writable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -9,7 +11,8 @@ import pino from 'pino';
 import request from 'supertest';
 import { z } from 'zod';
 import { createApp } from '../../src/app';
-import { AdapterRegistry, createDefaultAdapterRegistry, type ProductDataAdapter } from '../../src/domain/integrations/adapters';
+import { AdapterRegistry, type ProductDataAdapter } from '../../src/domain/integrations/adapters';
+import { buildCandidate } from '../../src/domain/integrations/productData';
 import { FAMILY_CAPABILITIES, IntegrationFailure } from '../../src/domain/integrations/integration.model';
 import { ProviderRouter } from '../../src/domain/integrations/routing';
 import { EnvSecretResolver } from '../../src/domain/integrations/secrets';
@@ -38,13 +41,36 @@ const BASE = '/v1/admin/integrations';
 // ---------------- fake adapters ----------------
 const productAdapter = (): ProductDataAdapter => ({
   family: 'product_data',
-  lookupBarcode: async (_ctx, gtin) => ({ external_id: `ext-${gtin}`, gtin, brand_name: 'Example', product_name: 'Example Product', market: null }),
+  lookupBarcode: async (ctx, gtin) =>
+    buildCandidate({
+      provider_key: ctx.provider_key,
+      external_product_id: `ext-${gtin}`,
+      retrieved_at: new Date().toISOString(),
+      barcode: { canonical_gtin: gtin, provider_code: gtin },
+      brand_name: 'Example',
+      product_name: 'Example Product',
+      variant_name: null,
+      markets: [],
+      package: null,
+      servings: [],
+      nutrition: [],
+      ingredients_text: null,
+      warnings: [],
+      unresolved_fields: [],
+      classification: 'commercial_nutrition_database',
+      provider_record_url: null,
+      policy: { terms_reference: 'test', indefinitely_storable: [], temporary_cache_max_seconds: 0, raw_response_retention: 'none', persistence: 'pending_licence_decision', attribution: { required: false, text: null, link: null, licence: null } },
+      storable: {},
+    }),
   searchProducts: async () => [],
 });
 const emptyConfig = z.strictObject({});
 
+const SECRET_SOURCE: Record<string, string> = { EXAMPLE_PRODUCT_SECRET: SECRET_VALUE, FAILING_SECRET: SECRET_VALUE };
+
 function buildRegistry(): AdapterRegistry {
-  return createDefaultAdapterRegistry()
+  return new AdapterRegistry()
+    .registerInternal({ key: 'internal_product_catalog', family: 'product_data', capabilities: ['product_search', 'barcode_lookup', 'nutrition_lookup'] })
     .register({
       provider_key: 'example_product_provider',
       capabilities: ['barcode_lookup', 'product_search'],
@@ -54,6 +80,7 @@ function buildRegistry(): AdapterRegistry {
         request_timeout_ms: z.number().int().positive().max(30_000).optional(),
       }),
       adapter: productAdapter(),
+      credential: { reference: 'env:EXAMPLE_PRODUCT_SECRET' },
       testConnection: async (ctx) => {
         if ((await ctx.secret()) !== SECRET_VALUE) throw new IntegrationFailure('authentication_failed');
       },
@@ -77,6 +104,7 @@ function buildRegistry(): AdapterRegistry {
       capabilities: ['barcode_lookup'],
       configSchema: emptyConfig,
       adapter: productAdapter(),
+      credential: { reference: 'env:FAILING_SECRET' },
       // A raw provider error that even contains the secret: must be mapped, never surfaced.
       testConnection: async (ctx) => {
         throw new Error(`upstream said 500 for key ${await ctx.secret()}`);
@@ -127,7 +155,7 @@ beforeAll(async () => {
     logger: pino({ level: 'trace' }, sink),
     integrations: {
       registry: buildRegistry(),
-      secrets: new EnvSecretResolver({ EXAMPLE_PRODUCT_SECRET: SECRET_VALUE, EXAMPLE_WRONG_SECRET: WRONG_SECRET_VALUE, FAILING_SECRET: SECRET_VALUE }),
+      secrets: new EnvSecretResolver(SECRET_SOURCE),
       deploymentEnvironment: 'test',
     },
   });
@@ -152,7 +180,7 @@ describe('A-E: platform administration is a separate security domain', () => {
       provider_family: 'product_data',
       connection_model: 'platform',
       credential_model: 'oauth_client',
-      credential: { required: true, secret_reference: null, configured: false },
+      credential: { required: true, attached: false, configured: false },
     });
     expect(fatsecret.capabilities.map((c: { capability: string }) => c.capability)).toEqual(['barcode_lookup', 'food_search', 'nutrition_lookup', 'product_search']);
   });
@@ -244,7 +272,12 @@ describe('§31 extensibility: a new ProductDataProvider plugs in without core ch
 
     const configured = await admin().patch(`${BASE}/example_product_provider`, { configuration: { api_version: 'v2', market: 'AE' }, secret_reference: 'env:EXAMPLE_PRODUCT_SECRET' });
     expect(configured.status).toBe(200);
-    expect(configured.body).toMatchObject({ configuration: { api_version: 'v2', market: 'AE' }, credential: { secret_reference: 'env:EXAMPLE_PRODUCT_SECRET', configured: true } });
+    expect(configured.body).toMatchObject({ configuration: { api_version: 'v2', market: 'AE' }, credential: { attached: true, configured: true } });
+    // Layer 11D: the reference name is write-only, and must be the one the adapter declares
+    expect(JSON.stringify(configured.body)).not.toContain('EXAMPLE_PRODUCT_SECRET');
+    const undeclared = await admin().patch(`${BASE}/example_product_provider`, { secret_reference: 'env:SOME_OTHER_SECRET' });
+    expect(undeclared.status).toBe(400);
+    expect(undeclared.body.error.details.reason).toBe('secret_reference_not_declared_by_adapter');
 
     const enabled = await admin().patch(`${BASE}/example_product_provider`, { enabled: true });
     expect(enabled.status).toBe(200);
@@ -274,10 +307,14 @@ describe('§31 extensibility: a new ProductDataProvider plugs in without core ch
     expect(route.configuration).toEqual({ api_version: 'v2', market: 'AE' });
     expect(JSON.stringify(plan)).not.toContain(SECRET_VALUE);
     const candidate = await (route.definition.adapter as ProductDataAdapter).lookupBarcode?.(
-      { provider_key: route.provider_key, environment: route.environment, configuration: route.configuration, timeoutMs: 1000, secret: async () => 'unused' },
+      { provider_key: route.provider_key, environment: route.environment, configuration: route.configuration, timeoutMs: 1000, secret: async () => 'unused', signal: new AbortController().signal, requestId: null },
       '04006381333931',
     );
-    expect(candidate).toMatchObject({ external_id: 'ext-04006381333931' });
+    expect(candidate).toMatchObject({ external_product_id: 'ext-04006381333931', status: 'unconfirmed_external_candidate', loggable: false });
+    expect(route.credential_attached).toBe(true);
+    // what the database hands an ordinary caller: no reference name (Layer 11D)
+    const rows = await db.rpcRows<Record<string, unknown>>('enabled_provider_routes', { p_family: 'product_data', p_capability: 'barcode_lookup' });
+    expect(rows).toEqual([{ provider_key: 'example_product_provider', priority: 5, environment: 'sandbox', configuration: { api_version: 'v2', market: 'AE' }, credential_attached: true }]);
   });
 });
 
@@ -428,11 +465,11 @@ describe('§21-24 health, failure and retry model', () => {
     expect(ok.body).toMatchObject({ result: 'succeeded', failure: null, enabled: true, credential_configured: true, health: { status: 'healthy', failure_code: null } });
     expect(ok.body.health.last_successful_check_at).toBe(ok.body.health.checked_at);
 
-    await admin().patch(`${BASE}/example_product_provider`, { secret_reference: 'env:EXAMPLE_WRONG_SECRET' });
+    SECRET_SOURCE.EXAMPLE_PRODUCT_SECRET = WRONG_SECRET_VALUE; // the deployment secret is rotated to a wrong value
     const bad = await admin().post(`${BASE}/example_product_provider/test`);
     expect(bad.body).toMatchObject({ result: 'failed', failure: { code: 'authentication_failed', retryable: false }, health: { status: 'authentication_failed', failure_code: 'authentication_failed' } });
     expect(bad.body.health.last_successful_check_at).toBe(ok.body.health.checked_at);
-    await admin().patch(`${BASE}/example_product_provider`, { secret_reference: 'env:EXAMPLE_PRODUCT_SECRET' });
+    SECRET_SOURCE.EXAMPLE_PRODUCT_SECRET = SECRET_VALUE;
 
     const health = await admin().get(`${BASE}/example_product_provider/health`);
     expect(health.body).toMatchObject({ provider_key: 'example_product_provider', health: { status: 'authentication_failed' } });

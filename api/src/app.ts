@@ -52,6 +52,9 @@ import { createIntegrationAdminRouter } from './domain/integrations/integration.
 import { IntegrationService } from './domain/integrations/integration.service';
 import { createDefaultAdapterRegistry, type AdapterRegistry } from './domain/integrations/adapters';
 import { EnvSecretResolver, type SecretResolver } from './domain/integrations/secrets';
+import { ProviderExecutor } from './domain/integrations/execution';
+import { createBarcodeLookupHandler, createExternalProductRouter } from './domain/externalProducts/externalProduct.routes';
+import { ExternalProductService } from './domain/externalProducts/externalProduct.service';
 import type { ScopedDbFactory } from './lib/scopedDb';
 import type { Logger } from './lib/logger';
 import { AppError } from './lib/errors';
@@ -61,10 +64,11 @@ export interface AppDependencies {
   scopedDbFactory: ScopedDbFactory;
   jwtSecret: string;
   logger: Logger;
-  /** Layer 11C — provider adapters, secret resolution and the deployment
-   * environment label. Defaults: the production registry (no external
-   * adapters yet), `env:` secret references, NODE_ENV. */
-  integrations?: { registry?: AdapterRegistry; secrets?: SecretResolver; deploymentEnvironment?: string };
+  /** Layer 11C/11D — provider adapters, secret resolution and the
+   * deployment environment label. Defaults: the production registry
+   * (internal catalog + FatSecret + Open Food Facts adapters over real
+   * HTTP), `env:` secret references, NODE_ENV. */
+  integrations?: { registry?: AdapterRegistry; secrets?: SecretResolver; deploymentEnvironment?: string; now?: () => Date };
 }
 
 export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logger, integrations }: AppDependencies): Express {
@@ -89,11 +93,14 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   const foodService = new FoodService(scopedDbFactory);
   const nutritionService = new NutritionService(scopedDbFactory);
   const productService = new ProductService(scopedDbFactory);
+  const adapterRegistry = integrations?.registry ?? createDefaultAdapterRegistry();
+  const secretResolver = integrations?.secrets ?? new EnvSecretResolver();
   const integrationService = new IntegrationService(scopedDbFactory, {
-    registry: integrations?.registry ?? createDefaultAdapterRegistry(),
-    secrets: integrations?.secrets ?? new EnvSecretResolver(),
+    registry: adapterRegistry,
+    secrets: secretResolver,
     deploymentEnvironment: integrations?.deploymentEnvironment ?? process.env.NODE_ENV ?? 'development',
   });
+  const externalProductService = new ExternalProductService(scopedDbFactory, adapterRegistry, new ProviderExecutor(secretResolver, logger, integrations?.now), productService);
   const recipeService = new RecipeService(scopedDbFactory);
   const recipeVariantService = new RecipeVariantService(scopedDbFactory);
   const mealService = new MealService(scopedDbFactory);
@@ -139,7 +146,9 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
 
   // Layer 11A — global Product & Barcode reference data (read-only) and
   // exact-Product nutrition through the Layer 5B engine.
-  v1.use('/products', requireAuth, createProductRouter(productService));
+  v1.use('/products', requireAuth, createProductRouter(productService, createBarcodeLookupHandler(externalProductService)));
+  // Layer 11D — unconfirmed external product candidates (never Products).
+  v1.use('/external-products', requireAuth, createExternalProductRouter(externalProductService));
   // Layer 11C — platform administration (platform_admin only).
   v1.use('/admin/integrations', requireAuth, createIntegrationAdminRouter(integrationService));
   app.use('/v1', v1);

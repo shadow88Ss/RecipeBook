@@ -14,6 +14,8 @@ export const ErrorCode = {
   CONFLICT: 'CONFLICT',
   RATE_LIMITED: 'RATE_LIMITED',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
+  /** Layer 11D — an external dependency could not answer (no detail given). */
+  SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -26,6 +28,7 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   CONFLICT: 409,
   RATE_LIMITED: 429,
   INTERNAL_ERROR: 500,
+  SERVICE_UNAVAILABLE: 503,
 };
 
 /**
@@ -79,5 +82,9 @@ export class AppError extends Error {
 
   static internal(message = 'An unexpected error occurred.'): AppError {
     return new AppError(ErrorCode.INTERNAL_ERROR, message);
+  }
+
+  static unavailable(message = 'This service is temporarily unavailable.'): AppError {
+    return new AppError(ErrorCode.SERVICE_UNAVAILABLE, message);
   }
 }
