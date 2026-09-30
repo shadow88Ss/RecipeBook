@@ -28,6 +28,8 @@ import { createFoodRouter, createNutrientRouter } from './domain/foods/food.rout
 import { FoodService } from './domain/foods/food.service';
 import { createUnitRouter } from './domain/conversion/unit.routes';
 import { createNutritionRouter } from './domain/nutrition/nutrition.routes';
+import { createProductRouter } from './domain/products/product.routes';
+import { ProductService } from './domain/products/product.service';
 import { NutritionService } from './domain/nutrition/nutrition.service';
 import { createRecipeRouter, createRecipeVariantRouter } from './domain/recipes/recipe.routes';
 import { RecipeService } from './domain/recipes/recipe.service';
@@ -78,6 +80,7 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   const effectiveTargetService = new EffectiveTargetService(scopedDbFactory);
   const foodService = new FoodService(scopedDbFactory);
   const nutritionService = new NutritionService(scopedDbFactory);
+  const productService = new ProductService(scopedDbFactory);
   const recipeService = new RecipeService(scopedDbFactory);
   const recipeVariantService = new RecipeVariantService(scopedDbFactory);
   const mealService = new MealService(scopedDbFactory);
@@ -120,6 +123,10 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   v1.use('/units', requireAuth, createUnitRouter());
   // Layer 5B — the single deterministic nutrition-calculation engine.
   v1.use('/nutrition', requireAuth, createNutritionRouter(nutritionService));
+
+  // Layer 11A — global Product & Barcode reference data (read-only) and
+  // exact-Product nutrition through the Layer 5B engine.
+  v1.use('/products', requireAuth, createProductRouter(productService));
   app.use('/v1', v1);
 
   app.use((req, _res, next) => {

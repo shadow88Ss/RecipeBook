@@ -232,7 +232,7 @@ Every nutrient in the `Nutrient` vocabulary appears, per item and in the aggrega
 2. `ai_matched` values are never authoritative (§14 rule 8) — excluded and listed in `excluded[]` with `ai_matched_not_authoritative`.
 3. `user_entered` values are excluded (`user_entered_not_permitted`) because Master §16 allows user-entered label data only within a product/user-data workflow that permits it, and none exists yet. They stay identifiable. (Since the Layer 5C final boundary, global `food_nutrient` rejects new `user_entered`/`ai_matched` rows; rules 2–3 remain as defense in depth for any retained historical row and for future non-global inputs.)
 4. Exactly one authoritative candidate → selected, with its `food_nutrient_id`, source and basis in `source`.
-5. Both `trusted_database` **and** `manufacturer_label` → `ambiguous_nutrient_source` with both `candidates`, even if the amounts agree. The principle "label data for the exact product, database data for a generic food" needs to know whether a Food row is a generic food or an exact branded product; the current schema cannot tell (`Food` is "food/product identity", `Product`/`Barcode` are not modeled, and `Food.source` is the identity row's provenance, not its kind). Resolving this needs the Product model (`11_Barcode_and_QR.md`).
+5. Both `trusted_database` **and** `manufacturer_label` → `ambiguous_nutrient_source` with both `candidates`, even if the amounts agree. The principle "label data for the exact product, database data for a generic food" needs to know whether a Food row is a generic food or an exact branded product; the current schema cannot tell (`Food` is "food/product identity", `Product`/`Barcode` are not modeled, and `Food.source` is the identity row's provenance, not its kind). Resolving this needs the Product model (`11_Barcode_and_QR.md`). **Resolved by Layer 11A (§27):** label nutrition now belongs to Product; new `food_nutrient` rows are `trusted_database` only, so this rule applies only to legacy Food rows.
 Competing values are **never summed and never averaged**.
 
 **AI identity vs nutrition authority.** A Food identified through an `ai_matched` alias is calculated like any other Food, but only from authoritative records. If none exist, every nutrient is `no_data`/`not_authoritative` with a null value — the engine reports the limitation and never estimates.
@@ -257,7 +257,7 @@ Competing values are **never summed and never averaged**.
 
 **Known limitations / deferred.**
 - ~~No approved nutrient vocabulary~~ — **resolved by Layer 5C (§16)**. The engine stays key-agnostic.
-- `trusted_database` vs `manufacturer_label` conflicts stay ambiguous until the Product model can tell generic foods from exact products.
+- ~~`trusted_database` vs `manufacturer_label` conflicts stay ambiguous until the Product model can tell generic foods from exact products~~ — **resolved by Layer 11A (§27)**: authority is identity-scoped; only legacy Food rows can still be ambiguous.
 - `user_entered` nutrient values are unusable until a product/user-data workflow permits them.
 - ~~User-entered serving weights remain usable~~ — **superseded by Layer 5C (§16)**: user-entered servings/densities are personal data, rejected from the global tables and non-authoritative if encountered.
 - Reference data is fetched per request (nutrient vocabulary capped at 1000 rows), per the §14 rule-11 development-foundation limits.
@@ -771,3 +771,29 @@ No tolerance band / "met target" flag (none is approved); energy is the canonica
 
 **Read-only:** the GET writes no snapshot, meal, plan, link, skip, goal, measurement, grocery, target or audit row (tested).
 
+---
+
+## 27. Phase 3 Layer 11A — Product & Barcode Intelligence Foundation (implemented)
+
+Exact branded/manufacturer products, barcode identity and manufacturer-label nutrition, separate from generic Food (Master §16.1; Data Dictionary §39). Code: `api/src/domain/products/`. Rules: `product-nutrition-11a.1`, `barcode-normalization-11a.1`, engine `nutrition-calculation-5b.1`. All routes require authentication; there is no POST/PATCH/DELETE on any product entity and no barcode reassignment endpoint.
+
+| Method & path | Purpose |
+|---|---|
+| `GET /v1/products?q=&market=&status=` | deterministic search (cursor pagination) |
+| `GET /v1/products/{product_id}` | detail |
+| `GET /v1/products/barcode/{code}?type=` | exact barcode lookup |
+| `POST /v1/products/{product_id}/nutrition/calculate` | exact-Product nutrition |
+
+**Barcode normalization.** Whitespace and hyphens are removed; any other non-digit is `invalid_characters`. 13 digits = EAN-13, 12 = UPC-A, 14 = GTIN-14; 8 digits need `type=ean_8|upc_e` (else `ambiguous_format` — never guessed). Canonical key = GTIN-14: EAN-13 → `0`+code, UPC-A → `00`+code (so a UPC-A and its EAN-13 form are one identity), UPC-E → expanded to UPC-A (GS1 rules; number system 0/1) → `00`+UPC-A, EAN-8 → `000000`+code. The GS1 mod-10 check digit is always validated (`invalid_check_digit`). Rejected as product identities: restricted-circulation/variable-measure/coupon ranges and a 12/13-digit code in the EAN-8 space (`restricted_circulation`, `reserved_range`). An invalid code is `400` with `details.reason`; a valid unknown or retired code is `404`. Lookup = exact canonical GTIN among **active** barcodes; the response is `{ match { submitted_digits, submitted_type, canonical_gtin, barcode_id, stored_barcode_type, match: exact_canonical_gtin, rules_version }, product }`.
+
+**Search.** `q` is NFKC/whitespace/case-normalized and matched against brand, product name, variant and their combination: `exact` > `prefix` > `contains` (no fuzzy/semantic matching), then brand, product name, variant, market, id. Optional `market` (ISO alpha-2) and `status` filters. Each result: identity, `display_name`, `market`, `package`, `status`, `generic_food_id`, `active_barcodes`, `match.kind`.
+
+**Detail DTO.** Identity (brand, product, variant, manufacturer, market), `package { quantity, unit }`, `status`, `generic_food { id, canonical_name, relationship: generic_category_only }`, `source`, `provenance_reference`, `barcodes[]` (gtin, type, status, retired_at, source), `current_label { id, version_number, status, nutrition_source, authority, provenance_reference, effective_from, published_at, nutrients[] (nutrient_key, unit, amount, is_zero, basis, source, authority), servings[], completeness { nutrients_on_label, vocabulary_size, missing_nutrient_keys } }`, `label_versions[]` (newest first, superseded kept). No account or ingestion-security metadata.
+
+**Nutrition calculation.** Body `{ quantity, unit | product_serving_id, label_version_id? }` (default: the current label; a superseded version stays calculable; a serving must belong to that version). The Product's label nutrients and servings are passed to the Layer 5B engine — no second engine, no Food data: each nutrient is read at its explicit basis, converted with Layer 5A (mass ↔ volume only through a label serving; **no density is borrowed from the generic Food** → `basis_unreconcilable` / `density_unavailable`), scaled exactly, rounded once (6 dp). Response: `nutrition_scope: exact_product`, `generic_food_fallback: none`, `label_version`, `label_status` (`authoritative_label` | `non_authoritative_label` | `no_label_version`), `normalized_quantity`, `nutrients[]` (5B statuses; `source { product_nutrient_id, source: manufacturer_label, authority: exact_product, basis… }`), `coverage_summary`, `summary`. Missing label nutrients are `no_data` (never Food values); a label 0 is a known zero; a `third_party_product_database` label gives `not_authoritative` with the excluded value listed; a Product without a label gives all `no_data`. Energy is the stored label kcal value — no 4/4/9, no kJ conversion.
+
+**Authority (identity-scoped).** Food scope: `trusted_database` authoritative; Product scope: `manufacturer_label` authoritative. §15 rule 5 (`ambiguous_nutrient_source`) now applies only to legacy Food rows that predate `food_nutrient_generic_reference_source`.
+
+**Security.** SELECT-only RLS for `authenticated` on all five tables (no INSERT/UPDATE/DELETE grant or policy); `publish_product_label_version()` is not executable by clients; unauthenticated requests are `401`; any authenticated Account reads the global reference data.
+
+**Extension points (not built).** *Product meal logging (11B):* a MealItem may reference `product_id` + `label_version_id` + quantity/serving, calculated by this endpoint's path and snapshotted like Food/Recipe items. *Retailer:* RetailerProduct ↔ Retailer (SKU, price, availability, cart) reference Product and never add fields to it. **Deferred:** camera scanning, external barcode providers, user-created products or label entry (needs an ownership/review model), product density, kJ labels, admin reassignment workflow, database-pushed search.

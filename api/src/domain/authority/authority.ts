@@ -6,10 +6,11 @@
 //                                 nutrition-database values; authoritative
 //                                 for everyone.
 //   exact_product                 manufacturer_label — authoritative for the
-//                                 exact represented product. Until a
-//                                 Product/Barcode model exists, a label value
-//                                 that competes with a database value is
-//                                 ambiguous (Layer 5B).
+//                                 exact represented product. Since Layer 11A
+//                                 label nutrition belongs to Product
+//                                 (products/product.service.ts); only legacy
+//                                 Food rows can still compete with a database
+//                                 value (ambiguous, Layer 5B).
 //   personal_user_confirmed       user_entered — user-confirmed personal
 //                                 data. Usable only for that user's own
 //                                 resolved food/meal inside an approved

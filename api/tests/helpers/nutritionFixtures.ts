@@ -9,6 +9,7 @@
 // has no client write path).
 
 import type { Pool } from 'pg';
+import { insertLegacyFoodNutrients } from './legacyFoodNutrient';
 
 const id = (group: number, n: number) => `f5b${group}0000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 
@@ -126,10 +127,10 @@ export async function seedNutritionFixtures(pool: Pool): Promise<void> {
 
     [F.thirds, NUT.protein, 1, 'trusted_database', 300, 'g'],
   ];
+  const sql = 'insert into food_nutrient (food_id, nutrient_id, amount_per_canonical_unit, source, basis_quantity, basis_unit) values ($1, $2, $3, $4, $5, $6)';
   for (const row of values) {
-    await pool.query(
-      'insert into food_nutrient (food_id, nutrient_id, amount_per_canonical_unit, source, basis_quantity, basis_unit) values ($1, $2, $3, $4, $5, $6)',
-      row,
-    );
+    // manufacturer_label on a generic Food predates Layer 11A (legacy fixture)
+    if (row[3] === 'manufacturer_label') await insertLegacyFoodNutrients(pool, sql, row);
+    else await pool.query(sql, row);
   }
 }

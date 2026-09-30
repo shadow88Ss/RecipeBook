@@ -164,6 +164,10 @@ No screen, module, or AI prompt computes an effective target independently. All 
 
 No new entities and no schema change. Progress (`30_API.md` §26) derives three independent views from existing records: Layer 8B fulfillment (PlanFulfillment read model over PlannedMealItem, PlannedActualLink, PlannedMealItemSkip, MealItem), nutrition adherence (MealLog/MealItem snapshots × `daily_tracking` EffectiveTargetSnapshot per local date) and measurement progress (WeightMeasurement correction chains, Goal). Active WeightMeasurement = a row no other row corrects (A → B → C: only C). Since the Layer 10B closure at most one row may correct a given row (unique partial index `uq_weight_measurement_single_correction` on `corrects_measurement_id`, migration `20261009120000`); a legacy branch that predates it is reported as conflicting and excluded, never resolved. Goal has `goal_type` (loss/maintenance/gain/…) and optional `target_weight_kg` but no start value — percent-to-goal is not derivable and no baseline is inferred (Master §8.5; a future explicit baseline measurement id or value + unit + captured date would be a separate approved change).
 
+### 4.7 Product & Barcode (Phase 3 Layer 11A)
+
+New entities **Product**, **ProductLabelVersion**, **ProductNutrient**, **ProductServing**, **Barcode** (field-level definitions: Data Dictionary §39; migration `20261010120000_product_barcode_foundation.sql`). Product = exact commercial identity with optional generic `food_id` (category only); ProductLabelVersion = one immutable manufacturer label (numbered 1..n, one current, superseded kept); ProductNutrient/ProductServing belong to a label version (never to Food/FoodServing); Barcode = canonical GTIN-14 → Product, one active row per GTIN, retire-never-delete. Food vs Product authority is identity-scoped (Master §16.1); new `food_nutrient` rows are `trusted_database` only (`food_nutrient_generic_reference_source`, NOT VALID). Future: MealItem may reference Product + label version (Layer 11B); RetailerProduct references Product (never fields on Product).
+
 ---
 
 ## 5. Clinician-Defined Targets

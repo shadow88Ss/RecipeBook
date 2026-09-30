@@ -689,6 +689,16 @@ AI may identify a probable match but may not fabricate an authoritative nutrient
 
 When uncertainty materially affects nutrition calculations, the user should be asked to confirm or choose among reasonable matches.
 
+## 16.1 Food vs Product — identity-scoped authority (Phase 3 Layer 11A)
+
+- **Food** is a generic nutritional/reference identity (banana, Greek yogurt). **Product** is one exact commercial/manufacturer identity (Brand X Greek Yogurt 500 g, in one market). They are separate entities; branded products are never stored as Food rows or aliases. A Product may name a Food as its **generic category only** (search, categorization, later substitution) — the Food never supplies the Product's nutrition, servings or density.
+- **Authority is identity-scoped.** `trusted_database` is the authority for a generic Food; `manufacturer_label` is the authority for an exact Product. They are no longer competing values on one record: new `food_nutrient` rows must be `trusted_database` (legacy `manufacturer_label` rows on Foods are kept and still resolve as in Layer 5B), and label nutrition lives on the Product. A `third_party_product_database` label is stored with provenance but is **not authoritative** until a specific database is approved.
+- **Label revisions.** Label nutrition and label servings belong to an immutable **ProductLabelVersion**. A reformulation publishes version n+1 and supersedes n; superseded versions remain readable and calculable, so provenance is never overwritten. Consumed history stays protected by Layer 7A snapshots; a future Product meal log snapshots its exact label version.
+- **Barcodes.** A barcode identifies a Product by its canonical 14-digit GTIN (UPC-A ≡ EAN-13 with a leading 0; UPC-E expanded; EAN-8 padded), GS1 check digit validated, restricted-circulation / variable-measure / coupon ranges rejected, 8-digit codes only with a declared type. One active barcode per GTIN (database-enforced). Barcodes are never deleted and never re-pointed: retirement keeps the row and provenance; reuse of a GTIN for another Product only through a future authorized trusted ingestion/admin workflow — no client endpoint.
+- **Nutrition.** Exact Product nutrition uses the Product's label values at their explicit basis (never assumed per 100 g) through the single Layer 5B engine. Missing label values stay missing — **no fallback to generic Food nutrition or density**; a label 0 is a known zero; energy is the stored kcal value (no macro formula, no kJ inference). Package size and label serving are separate facts.
+- **Provenance.** Every Product, label version, label nutrient, label serving and barcode records its source; user-entered data is never called manufacturer-verified, and no user-created global Product data exists (no ownership/review model).
+- **Boundaries.** Product is not a RetailerProduct: retailer SKU, price, store, availability and carts belong to future retailer models referencing Product. Products are global reference data: authenticated read, writes by trusted ingestion only.
+
 ---
 
 # 17. Wearable Data Rules

@@ -11,6 +11,7 @@
 // client write path, by design.
 
 import type { Pool } from 'pg';
+import { insertLegacyFoodNutrients } from './legacyFoodNutrient';
 
 export const FOOD = {
   chickpeas: 'f5a00000-0000-4000-8000-000000000001',
@@ -96,7 +97,9 @@ export async function seedFoodFixtures(pool: Pool): Promise<void> {
 
   // Two sources for chickpeas/protein deliberately coexist (Data Dictionary
   // §18: multiple sourced values per pair are intentional).
-  await pool.query(
+  // (the manufacturer_label row predates Layer 11A — legacy fixture)
+  await insertLegacyFoodNutrients(
+    pool,
     `insert into food_nutrient (food_id, nutrient_id, amount_per_canonical_unit, source) values
        ($1, $2, 164, 'trusted_database'),
        ($1, $3, 8.9, 'trusted_database'),

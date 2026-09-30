@@ -213,22 +213,22 @@ describe('Final boundary: food_nutrient is global reference data only', () => {
     await expect(insertNutrient('trusted_database')).resolves.toMatchObject({ rowCount: 1 });
   });
 
-  it('manufacturer_label stays representable', async () => {
-    await expect(insertNutrient('manufacturer_label')).resolves.toMatchObject({ rowCount: 1 });
+  it('manufacturer_label is no longer accepted on a generic Food (Layer 11A G2: label nutrition belongs to Product)', async () => {
+    await expect(insertNutrient('manufacturer_label')).rejects.toThrow(/food_nutrient_generic_reference_source/);
   });
 
   it('2: a user_entered row is rejected', async () => {
-    await expect(insertNutrient('user_entered')).rejects.toThrow(/food_nutrient_global_source/);
+    await expect(insertNutrient('user_entered')).rejects.toThrow(/food_nutrient_(global_source|generic_reference_source)/);
   });
 
   it('3: an ai_matched row is rejected', async () => {
-    await expect(insertNutrient('ai_matched')).rejects.toThrow(/food_nutrient_global_source/);
+    await expect(insertNutrient('ai_matched')).rejects.toThrow(/food_nutrient_(global_source|generic_reference_source)/);
   });
 
   it('an existing row cannot be re-sourced to user_entered or ai_matched', async () => {
     for (const source of ['user_entered', 'ai_matched']) {
       await expect(pool.query('update food_nutrient set source = $2::food_data_source where food_id = $1', [F.rice, source])).rejects.toThrow(
-        /food_nutrient_global_source/,
+        /food_nutrient_(global_source|generic_reference_source)/,
       );
     }
   });
@@ -256,6 +256,7 @@ describe('Final boundary: food_nutrient is global reference data only', () => {
       // Simulate a database that already held a legacy personal/AI row
       // before the boundary migration ran.
       await client.query('alter table food_nutrient drop constraint food_nutrient_global_source');
+      await client.query('alter table food_nutrient drop constraint food_nutrient_generic_reference_source'); // Layer 11A, later
       await client.query(
         "insert into food_nutrient (food_id, nutrient_id, amount_per_canonical_unit, source) select $1, id, 7, 'user_entered' from nutrient where canonical_key = 'protein'",
         [F.aiIdentity],
