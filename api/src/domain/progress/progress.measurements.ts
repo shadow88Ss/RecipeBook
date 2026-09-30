@@ -2,11 +2,12 @@
 //
 // WeightMeasurement is append-only; a correction is a NEW row whose
 // `corrects_measurement_id` names the row it corrects. Active measurements
-// are those no other row corrects. The model does not stop two rows from
-// correcting the same measurement; such a branch cannot be resolved without
-// guessing, so every row descending from it is reported as
-// `conflicting_correction` and excluded from first/latest/change — never
-// picked. Ordering is by measured_at (then created_at, id), never
+// are those no other row corrects, so A -> B -> C resolves to C alone. Since
+// the Layer 10B closure the database allows at most one direct correction
+// per measurement (uq_weight_measurement_single_correction); a LEGACY branch
+// that predates it cannot be resolved without guessing, so every row
+// descending from it is reported as `conflicting_correction` and excluded
+// from first/latest/change — never picked. Ordering is by measured_at (then created_at, id), never
 // insertion order. Nothing is interpolated, smoothed or predicted.
 //
 // Goals: the schema stores goal_type and an optional target_weight_kg, but

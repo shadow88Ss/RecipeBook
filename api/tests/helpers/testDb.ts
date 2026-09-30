@@ -12,7 +12,7 @@ import { Client, Pool } from 'pg';
 const ADMIN_URL = process.env.TEST_DATABASE_ADMIN_URL ?? 'postgresql://postgres:test_local_only_pw@127.0.0.1:5432/postgres';
 const DEFAULT_TEST_DB_NAME = 'recipebook_api_test';
 
-const MIGRATIONS_DIR = path.resolve(__dirname, '../../../supabase/migrations');
+export const MIGRATIONS_DIR = path.resolve(__dirname, '../../../supabase/migrations');
 const SHIM_FILE = path.resolve(__dirname, '../fixtures/auth-shim.sql');
 const SHIM_AFTER_MIGRATION = '20260825120900_audit_event.sql';
 
@@ -31,7 +31,7 @@ function testDbUrl(dbName: string): string {
  * test on). Defaults to the original fixed name so any pre-existing
  * single-file caller (Layer 4A's profiles.api.test.ts) needs no change.
  */
-export async function rebuildTestDatabase(dbName: string = DEFAULT_TEST_DB_NAME): Promise<Pool> {
+export async function rebuildTestDatabase(dbName: string = DEFAULT_TEST_DB_NAME, options: { stopBeforeMigration?: string } = {}): Promise<Pool> {
   const admin = new Client({ connectionString: ADMIN_URL });
   await admin.connect();
   try {
@@ -44,7 +44,12 @@ export async function rebuildTestDatabase(dbName: string = DEFAULT_TEST_DB_NAME)
   const client = new Client({ connectionString: testDbUrl(dbName) });
   await client.connect();
   try {
-    const files = (await readdir(MIGRATIONS_DIR)).filter((f) => f.endsWith('.sql')).sort();
+    // stopBeforeMigration (fixture-only): build a database as it stood BEFORE
+    // a given migration, e.g. to hold legacy rows a later invariant forbids.
+    const files = (await readdir(MIGRATIONS_DIR))
+      .filter((f) => f.endsWith('.sql'))
+      .sort()
+      .filter((f) => !options.stopBeforeMigration || f < options.stopBeforeMigration);
     for (const file of files) {
       const sql = await readFile(path.join(MIGRATIONS_DIR, file), 'utf8');
       await client.query(sql);

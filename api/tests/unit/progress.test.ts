@@ -6,6 +6,8 @@ import type { WeightMeasurementRow } from '../../src/domain/weightMeasurements/w
 import { classifyMeasurements, goalProgress } from '../../src/domain/progress/progress.measurements';
 import { nutritionRange } from '../../src/domain/progress/progress.nutrition';
 import { progressQuerySchema } from '../../src/domain/progress/progress.schemas';
+import { fulfillmentRates } from '../../src/domain/progress/progress.service';
+import { FULFILLMENT_STATES, type FulfillmentState } from '../../src/domain/mealPlans/planFulfillment';
 
 const m = (id: string, measured_at: string, value_kg: number, corrects: string | null = null): WeightMeasurementRow => ({
   id,
@@ -64,5 +66,41 @@ describe('range aggregation and request', () => {
     expect(progressQuerySchema.safeParse({ from: '2026-02-01', to: '2026-01-31', timezone: 'UTC' }).success).toBe(false);
     expect(progressQuerySchema.safeParse({ from: '2026-01-01', to: '2026-06-30', timezone: 'UTC' }).success).toBe(false);
     expect(progressQuerySchema.safeParse({ from: '2026-01-01', to: '2026-01-31' }).success).toBe(false);
+  });
+});
+
+describe('fulfillment rates (10B closure)', () => {
+  const zero = () => Object.fromEntries(FULFILLMENT_STATES.map((s) => [s, 0])) as Record<FulfillmentState, number>;
+  const expectedBucket: Record<FulfillmentState, string> = {
+    fulfilled_exact: 'exact_fulfillment_rate',
+    fulfilled_with_substitution: 'substitution_rate',
+    above_planned_quantity: 'above_planned_quantity_rate',
+    partial: 'partial_rate',
+    skipped: 'skip_rate',
+    unlinked: 'unlinked_rate',
+    quantity_not_comparable: 'not_comparable_rate',
+    identity_changed_by_correction: 'not_comparable_rate',
+  };
+
+  it.each(FULFILLMENT_STATES)('A-H: one %s item contributes to exactly one rate', (state) => {
+    const r = fulfillmentRates({ ...zero(), [state]: 1 });
+    const hits = Object.entries(r).filter(([k, v]) => k.endsWith('_rate') && (v as { count: number }).count > 0);
+    expect(hits).toEqual([[expectedBucket[state], { count: 1, denominator: 1, percentage: 100 }]]);
+  });
+
+  it('M: count / denominator x 100, exact then rounded half-up once to 6 places', () => {
+    const r = fulfillmentRates({ ...zero(), fulfilled_exact: 2, partial: 1 });
+    expect(r.exact_fulfillment_rate).toEqual({ count: 2, denominator: 3, percentage: 66.666667 });
+    expect(r.partial_rate).toEqual({ count: 1, denominator: 3, percentage: 33.333333 });
+    expect(r.denominator).toEqual({ name: 'eligible_current_confirmed_planned_items', value: 3 });
+  });
+
+  it('N/O: zero denominator gives null rates; no combined rate key exists', () => {
+    const r = fulfillmentRates(zero());
+    expect(r.status).toBe('no_eligible_planned_items');
+    expect(Object.keys(r).sort()).toEqual(
+      ['above_planned_quantity_rate', 'denominator', 'exact_fulfillment_rate', 'not_comparable_rate', 'partial_rate', 'skip_rate', 'status', 'substitution_rate', 'unlinked_rate'],
+    );
+    for (const [k, v] of Object.entries(r)) if (k.endsWith('_rate')) expect(v).toEqual({ count: 0, denominator: 0, percentage: null });
   });
 });

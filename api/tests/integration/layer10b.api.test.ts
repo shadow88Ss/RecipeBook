@@ -6,9 +6,16 @@
 // 10A: only the current local date). The tests therefore write them as
 // FIXTURES — rows exactly as a capture on that day would have stored them —
 // with triggers bypassed; today's snapshot is captured through the API.
+//
+// Legacy WeightMeasurement correction BRANCHES can no longer be written
+// (10B closure: uq_weight_measurement_single_correction). They are tested in
+// a separate, isolated FIXTURE database built only up to the migration
+// before that invariant — production rules are never weakened here.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import type { Pool } from 'pg';
 import request from 'supertest';
 import { createApp } from '../../src/app';
@@ -16,7 +23,7 @@ import { logger } from '../../src/lib/logger';
 import { localDateOf } from '../../src/domain/meals/meal.time';
 import { PgHarnessProfileRepository } from '../helpers/pgHarnessProfileRepository';
 import { PgHarnessScopedDbFactory } from '../helpers/pgHarnessScopedDb';
-import { rebuildTestDatabase } from '../helpers/testDb';
+import { MIGRATIONS_DIR, rebuildTestDatabase } from '../helpers/testDb';
 import { seedScenario, SEED } from '../helpers/seed';
 import { F, NUT, SRV, seedNutritionFixtures } from '../helpers/nutritionFixtures';
 import { signTestToken, TEST_JWT_SECRET } from '../helpers/jwt';
@@ -39,12 +46,14 @@ const day = (offset: number) => {
 };
 const TODAY = () => day(0);
 const noon = (date: string) => `${date}T12:00:00.000Z`;
+/** noon, but never in the future (today before 12:00 UTC). */
+const consumedAt = (date: string) => new Date(Math.min(Date.parse(noon(date)), Date.now() - 60_000)).toISOString();
 const food = (food_id: string, quantity: number, unit = 'g') => ({ type: 'food', food_id, quantity, unit });
 
 const progress = (account: string, profile: string, from: string, to: string, timezone = UTC) => as(account).get(`/v1/profiles/${profile}/progress`, { from, to, timezone });
 
 async function logMeal(account: string, profile: string, date: string, items: unknown[]) {
-  const res = await as(account).post(`/v1/profiles/${profile}/meals`, { meal_type: 'lunch', logged_date: date, local_timezone: UTC, consumed_at: noon(date), items });
+  const res = await as(account).post(`/v1/profiles/${profile}/meals`, { meal_type: 'lunch', logged_date: date, local_timezone: UTC, consumed_at: consumedAt(date), items });
   expect(res.status).toBe(201);
   return { mealLogId: res.body.id as string, itemIds: res.body.items.map((i: { id: string }) => i.id) as string[] };
 }
@@ -92,6 +101,9 @@ let recipe: { id: string; v1: string };
 let planId: string;
 let milkUnplanned: string;
 let riceOfReplacedLunch: string;
+let excludedDraftItem: string;
+let excludedCancelledItem: string;
+let chainIds: { original: string; first: string; second: string };
 
 beforeAll(async () => {
   pool = await rebuildTestDatabase('recipebook_api_test_layer10b');
@@ -135,8 +147,9 @@ beforeAll(async () => {
   const m3 = await weigh(day(-3), 7, 79.5);
   await weigh(day(-3), 7, 79, m3); // correction
   const m4 = await weigh(day(-2), 7, 78.9);
-  await weigh(day(-2), 7, 78.95, m4); // two corrections of one row -> conflicting branch
-  await weigh(day(-2), 7, 78.85, m4);
+  const m4b = await weigh(day(-2), 7, 78.95, m4); // A -> B
+  const m4c = await weigh(day(-2), 7, 78.85, m4b); // B -> C (a chain; C is active)
+  chainIds = { original: m4, first: m4b, second: m4c };
   for (const body of [
     { goal_type: 'weight_loss', target_weight_kg: 75 },
     { goal_type: 'maintenance' },
@@ -187,6 +200,14 @@ beforeAll(async () => {
   // M: replace the linked lunch; the original becomes history
   expect((await A().post(`/v1/profiles/${SEED.profileA}/meal-plans/${planId}/items/${lunch}/replace`, food(F.rice, 120))).status).toBe(201);
   expect((await A().post(`/v1/profiles/${SEED.profileA}/meal-plans/${planId}/confirm`)).status).toBe(200);
+  // J/K: in-range intent that is NOT confirmed (a draft snack, a cancelled one)
+  const after = (await A().get(`/v1/profiles/${SEED.profileA}/meal-plans/${planId}`)).body;
+  const d2Id = after.days.find((d: { plan_date: string }) => d.plan_date === day(-2)).id;
+  const snack = await A().post(`/v1/profiles/${SEED.profileA}/meal-plans/${planId}/days/${d2Id}/meals`, { meal_type: 'snack', position: 3, items: [food(F.rice, 40), food(F.spinach, 40)] });
+  expect(snack.status).toBe(201);
+  const snackMeal = snack.body.days.find((d: { plan_date: string }) => d.plan_date === day(-2)).meals.find((m: { meal_type: string }) => m.meal_type === 'snack');
+  [excludedDraftItem, excludedCancelledItem] = snackMeal.items.map((i: { id: string }) => i.id);
+  expect((await A().patch(`/v1/profiles/${SEED.profileA}/meal-plans/${planId}/items/${excludedCancelledItem}`, { status: 'cancelled' })).status).toBe(200);
 }, 120_000);
 
 afterAll(async () => {
@@ -227,7 +248,7 @@ describe('range validation (A, B, D, E)', () => {
 });
 
 describe('plan fulfillment (C, F-M)', () => {
-  it('C/F-M: Layer 8B states are counted per state; superseded intent excluded; corrected actual counted once; no fulfilled-rate', async () => {
+  it('C/F-M: Layer 8B states are counted per state; superseded intent excluded; corrected actual counted once; no combined rate', async () => {
     const res = await progress(SEED.accountA, SEED.profileA, day(-5), TODAY());
     expect(res.status).toBe(200);
     const pf = res.body.plan_fulfillment;
@@ -243,7 +264,7 @@ describe('plan fulfillment (C, F-M)', () => {
       above_planned_quantity: 0,
     });
     expect(pf.counts.by_state).toMatchObject({ quantity_not_comparable: 1, identity_changed_by_correction: 0 });
-    expect(pf.fulfilled_item_rate).toMatchObject({ value: null, status: 'classification_not_approved' });
+    expect(pf.fulfilled_item_rate).toMatchObject({ value: null, status: 'deprecated_no_combined_classification' });
     // K: unplanned actuals are factual (active chain records only). The rice
     // linked only to the replaced (no longer current) lunch is unplanned, as in 8B.
     expect(pf.unplanned_actual_item_count).toBe(2);
@@ -260,6 +281,59 @@ describe('plan fulfillment (C, F-M)', () => {
     const res = await progress(SEED.accountA, SEED.profileA, day(-2), day(-2));
     expect(res.body.plan_fulfillment.counts).toMatchObject({ confirmed_planned_items: 3, unlinked: 2, not_comparable: 1 });
     expect(res.body.plan_fulfillment.unplanned_actual_item_count).toBe(1);
+  });
+});
+
+describe('fulfillment rates (10B closure: separate rates, one explicit denominator)', () => {
+  const rate = (count: number, denominator: number, percentage: number | null) => ({ count, denominator, percentage });
+
+  it('A-F/G/M: one separate factual rate per top-level state; count, denominator and percentage agree', async () => {
+    const r = (await progress(SEED.accountA, SEED.profileA, day(-5), TODAY())).body.plan_fulfillment.rates;
+    expect(r).toEqual({
+      denominator: { name: 'eligible_current_confirmed_planned_items', value: 7 },
+      status: 'computed',
+      exact_fulfillment_rate: rate(1, 7, 14.285714),
+      substitution_rate: rate(1, 7, 14.285714),
+      above_planned_quantity_rate: rate(0, 7, 0),
+      partial_rate: rate(1, 7, 14.285714),
+      skip_rate: rate(1, 7, 14.285714), // a confirmed skip stays in the denominator
+      unlinked_rate: rate(2, 7, 28.571429), // so does a confirmed unlinked item
+      not_comparable_rate: rate(1, 7, 14.285714),
+    });
+    // one bucket per item: the buckets partition the denominator exactly
+    const buckets = Object.entries(r).filter(([k]) => k.endsWith('_rate')) as Array<[string, { count: number }]>;
+    expect(buckets.reduce((a, [, b]) => a + b.count, 0)).toBe(7);
+  });
+
+  it('I/J/K: superseded, cancelled and unconfirmed items are excluded from the denominator', async () => {
+    const res = await progress(SEED.accountA, SEED.profileA, day(-5), TODAY());
+    const plan = (await A().get(`/v1/profiles/${SEED.profileA}/meal-plans/${planId}`)).body;
+    const all = plan.days.flatMap((d: { meals: Array<{ items: Array<{ id: string; status: string }> }> }) => d.meals.flatMap((m) => m.items));
+    expect(all.find((i: { id: string }) => i.id === excludedDraftItem).status).toBe('draft');
+    expect(all.find((i: { id: string }) => i.id === excludedCancelledItem).status).toBe('cancelled');
+    expect(res.body.plan_fulfillment.rates.denominator.value).toBe(7); // 7 current confirmed; replaced lunch, draft and cancelled not counted
+  });
+
+  it('L: items outside the requested range are excluded', async () => {
+    const r = (await progress(SEED.accountA, SEED.profileA, day(-2), day(-2))).body.plan_fulfillment.rates;
+    expect(r.denominator.value).toBe(3);
+    expect(r.unlinked_rate).toEqual(rate(2, 3, 66.666667));
+    expect(r.not_comparable_rate).toEqual(rate(1, 3, 33.333333));
+    expect(r.exact_fulfillment_rate).toEqual(rate(0, 3, 0));
+  });
+
+  it('N: a zero denominator gives null rates (not 0%) with a factual status', async () => {
+    const r = (await progress(SEED.accountB, SEED.profileB, day(-7), day(-1))).body.plan_fulfillment.rates;
+    expect(r.denominator.value).toBe(0);
+    expect(r.status).toBe('no_eligible_planned_items');
+    for (const [k, v] of Object.entries(r)) if (k.endsWith('_rate')) expect(v).toEqual(rate(0, 0, null));
+  });
+
+  it('O: no combined fulfillment or adherence score exists', async () => {
+    const body = (await progress(SEED.accountA, SEED.profileA, day(-5), TODAY())).body;
+    expect(body.combined_score).toBeNull();
+    expect(body.plan_fulfillment.fulfilled_item_rate.value).toBeNull();
+    expect(JSON.stringify(body)).not.toMatch(/adherence_score|compliance_score|success_score|health_score|fulfillment_score/);
   });
 });
 
@@ -344,14 +418,14 @@ describe('goal progress (AA-AF)', () => {
       [day(-3), 79.5, 'superseded_by_correction'],
       [day(-3), 79, 'active'],
       [day(-2), 78.9, 'superseded_by_correction'],
-      [day(-2), 78.95, 'conflicting_correction'],
-      [day(-2), 78.85, 'conflicting_correction'],
+      [day(-2), 78.95, 'superseded_by_correction'],
+      [day(-2), 78.85, 'active'],
       [day(-1), 78.8, 'active'],
     ]);
     expect(gp).toMatchObject({
       measurement_type: 'body_weight',
-      active_measurement_count: 3,
-      excluded: { superseded_by_correction: 2, conflicting_correction: 2 },
+      active_measurement_count: 4,
+      excluded: { superseded_by_correction: 3, conflicting_correction: 0 },
       first_active: { value: 80, unit: 'kg' },
       latest_active: { value: 78.8, unit: 'kg' },
       absolute_change_kg: -1.2,
@@ -369,6 +443,142 @@ describe('goal progress (AA-AF)', () => {
     expect(gp.goals[0]).toMatchObject({ target_weight_kg: 75, latest_measurement: { value: 78.8 }, difference_from_target_kg: 3.8, progress_percentage: null, progress_percentage_status: 'not_computable_goal_has_no_start_value' });
     expect(gp.inactive_goal_count).toBe(1);
     for (const g of gp.goals) expect(g.progress_percentage).toBeNull();
+  });
+});
+
+describe('goal progress is factual only (10B closure)', () => {
+  it('A-E: factual difference and range change; progress_percentage null; no implicit baseline; no evaluative wording', async () => {
+    // an older measurement exists (day -30, 82 kg): it must never become a baseline
+    const gp = (await progress(SEED.accountA, PROFILE_A2, day(-5), TODAY())).body.goal_progress;
+    const [weightLoss] = gp.goals;
+    expect(weightLoss).toEqual({
+      goal_id: expect.any(String),
+      goal_type: 'weight_loss',
+      target_weight_kg: 75,
+      target_date: null,
+      measurement_comparison: 'latest_measurement_vs_target',
+      latest_measurement: expect.objectContaining({ value: 78.8, unit: 'kg' }),
+      difference_from_target_kg: 3.8,
+      progress_percentage: null,
+      progress_percentage_status: 'not_computable_goal_has_no_start_value',
+    });
+    expect(gp.absolute_change_kg).toBe(-1.2); // latest active (78.8) - first active in range (80)
+    expect(JSON.stringify(gp)).not.toMatch(/baseline|"start_value|percent_to_goal|goal_completion|on_track|off_track|success|failure|"good"|"bad"/i);
+  });
+});
+
+describe('weight correction chain (10B closure: single-correction invariant)', () => {
+  const PROFILE_A3 = 'b0b0b0b0-0000-4000-8000-0000000000a3';
+  const wm = `/v1/profiles/${PROFILE_A3}/weight-measurements`;
+  const weigh = (value_kg: number, corrects?: string) =>
+    A().post(wm, { measured_at: noon(day(-4)), value_kg, ...(corrects ? { corrects_measurement_id: corrects } : {}) });
+  let a: string;
+  let b: string;
+
+  beforeAll(async () => {
+    await pool.query("insert into profile (id, account_id, display_name, is_child) values ($1, $2, 'Profile A3', false)", [PROFILE_A3, SEED.accountA]);
+  });
+
+  it('A/B/C: original and first correction accepted; a second direct correction of the same row is 409 without SQL details', async () => {
+    const orig = await weigh(70);
+    expect(orig.status).toBe(201);
+    a = orig.body.id;
+    const first = await weigh(70.5, a);
+    expect(first.status).toBe(201);
+    b = first.body.id;
+    const second = await weigh(70.4, a);
+    expect(second.status).toBe(409);
+    expect(second.body.error.code).toBe('CONFLICT');
+    expect(JSON.stringify(second.body)).not.toMatch(/uq_weight_measurement|duplicate key|23505|constraint/i);
+  });
+
+  it('D: concurrent corrections of one measurement: exactly one commits (API and database)', async () => {
+    const orig = (await weigh(71)).body.id as string;
+    const results = await Promise.all([weigh(71.1, orig), weigh(71.2, orig), weigh(71.3, orig)]);
+    expect(results.map((r) => r.status).sort()).toEqual([201, 409, 409]);
+    // database level, two open transactions racing on the same parent
+    const orig2 = (await weigh(72)).body.id as string;
+    const [c1, c2] = [await pool.connect(), await pool.connect()];
+    const insert = "insert into weight_measurement (profile_id, measured_at, value_kg, source, corrects_measurement_id) values ($1, now(), 72.5, 'user_entered', $2)";
+    try {
+      await c1.query('begin');
+      await c2.query('begin');
+      await c1.query(insert, [PROFILE_A3, orig2]);
+      const blocked = c2.query(insert, [PROFILE_A3, orig2]).then(() => 'committed', (e: { code?: string }) => e.code);
+      await c1.query('commit');
+      expect(await blocked).toBe('23505');
+      await c2.query('rollback');
+    } finally {
+      c1.release();
+      c2.release();
+    }
+    expect((await pool.query('select count(*)::int as n from weight_measurement where corrects_measurement_id = $1', [orig2])).rows[0].n).toBe(1);
+  });
+
+  it('E-H: A -> B -> C is valid; only C is active and counted once', async () => {
+    const c = await weigh(70.6, b);
+    expect(c.status).toBe(201);
+    const gp = (await progress(SEED.accountA, PROFILE_A3, day(-4), day(-4))).body.goal_progress;
+    const chain = gp.measurements.filter((m: { id: string }) => [a, b, c.body.id].includes(m.id));
+    expect(chain.map((m: { value: number; state: string }) => [m.value, m.state])).toEqual([
+      [70, 'superseded_by_correction'],
+      [70.5, 'superseded_by_correction'],
+      [70.6, 'active'],
+    ]);
+    expect(gp.measurements.filter((m: { state: string }) => m.state === 'active').filter((m: { id: string }) => [a, b, c.body.id].includes(m.id))).toHaveLength(1);
+    expect(gp.excluded.conflicting_correction).toBe(0);
+    // the Profile A2 chain seeded in beforeAll resolves the same way
+    const a2 = (await progress(SEED.accountA, PROFILE_A2, day(-2), day(-2))).body.goal_progress;
+    expect(a2.measurements.map((m: { id: string; state: string }) => [m.id, m.state])).toEqual([
+      [chainIds.original, 'superseded_by_correction'],
+      [chainIds.first, 'superseded_by_correction'],
+      [chainIds.second, 'active'],
+    ]);
+  });
+});
+
+describe('legacy correction branches (isolated pre-invariant FIXTURE database)', () => {
+  const INVARIANT = '20261009120000_weight_measurement_single_correction.sql';
+  let legacy: Pool;
+  let legacyApp: ReturnType<typeof createApp>;
+  const ids = { a: randomUUID(), b: randomUUID(), c: randomUUID(), d: randomUUID() };
+
+  beforeAll(async () => {
+    // FIXTURE ONLY: a database as it stood before the invariant, holding a
+    // branch (a -> b and a -> c, c -> d) that can no longer be written.
+    legacy = await rebuildTestDatabase('recipebook_api_test_layer10b_legacy', { stopBeforeMigration: INVARIANT });
+    await seedScenario(legacy);
+    const ins = 'insert into weight_measurement (id, profile_id, measured_at, value_kg, source, corrects_measurement_id) values ($1, $2, $3, $4, $5, $6)';
+    await legacy.query(ins, [ids.a, SEED.profileA, noon(day(-3)), 80, 'user_entered', null]);
+    await legacy.query(ins, [ids.b, SEED.profileA, noon(day(-3)), 79.9, 'user_entered', ids.a]);
+    await legacy.query(ins, [ids.c, SEED.profileA, noon(day(-3)), 79.8, 'user_entered', ids.a]);
+    await legacy.query(ins, [ids.d, SEED.profileA, noon(day(-3)), 79.7, 'user_entered', ids.c]);
+    legacyApp = createApp({ profileRepository: new PgHarnessProfileRepository(legacy), scopedDbFactory: new PgHarnessScopedDbFactory(legacy), jwtSecret: TEST_JWT_SECRET, logger });
+  }, 120_000);
+
+  afterAll(async () => {
+    await legacy.end();
+  });
+
+  it('I: a legacy branch stays conflicting_correction and is excluded, never guessed', async () => {
+    const res = await request(legacyApp).get(`/v1/profiles/${SEED.profileA}/progress`).query({ from: day(-3), to: day(-3), timezone: UTC }).set('Authorization', `Bearer ${signTestToken(SEED.accountA)}`);
+    expect(res.status).toBe(200);
+    const gp = res.body.goal_progress;
+    expect(Object.fromEntries(gp.measurements.map((m: { id: string; state: string }) => [m.id, m.state]))).toEqual({
+      [ids.a]: 'superseded_by_correction',
+      [ids.b]: 'conflicting_correction',
+      [ids.c]: 'superseded_by_correction',
+      [ids.d]: 'conflicting_correction',
+    });
+    expect(gp).toMatchObject({ active_measurement_count: 0, first_active: null, latest_active: null, excluded: { conflicting_correction: 2 } });
+  });
+
+  it('the invariant migration refuses to install over a legacy branch and changes no history', async () => {
+    const before = (await legacy.query('select id, corrects_measurement_id from weight_measurement order by id')).rows;
+    const sql = await readFile(path.join(MIGRATIONS_DIR, INVARIANT), 'utf8');
+    await expect(legacy.query(sql)).rejects.toThrow(/more than one direct correction/);
+    expect((await legacy.query('select id, corrects_measurement_id from weight_measurement order by id')).rows).toEqual(before);
+    expect((await legacy.query("select count(*)::int as n from pg_indexes where indexname = 'uq_weight_measurement_single_correction'")).rows[0].n).toBe(0);
   });
 });
 

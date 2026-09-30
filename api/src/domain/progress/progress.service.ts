@@ -4,9 +4,10 @@
 //
 //   plan_fulfillment     Layer 8B derived fulfillment of current confirmed
 //                        planned items whose plan date is in the range (not
-//                        re-matched here), counts per factual state, and
-//                        unplanned actual items. No fulfilled-rate: which
-//                        states count as "fulfilled" is not yet approved.
+//                        re-matched here), counts per factual state, one
+//                        separate rate per top-level state over one explicit
+//                        denominator, and unplanned actual items. There is
+//                        no combined fulfilled/adherence rate (10B closure).
 //   nutrition_adherence  per date: actual (immutable 7A snapshots) vs the
 //                        date's Layer 10A daily target snapshot only.
 //   goal_progress        WeightMeasurement history (corrections resolved,
@@ -24,10 +25,12 @@ import { IN_MEMORY_PAGE_FETCH_CAP } from '../../lib/pagination';
 import type { ScopedDbClient, ScopedDbFactory } from '../../lib/scopedDb';
 import type { AuthContext } from '../../types/express';
 
+import { div, roundHalfUp, type Rational } from '../conversion/decimal';
 import type { SnapshotRecord } from '../effectiveTarget/effectiveTarget.service';
 import { GOAL_COLUMNS, type GoalRow } from '../goals/goal.dto';
 import { FULFILLMENT_STATES, type FulfillmentState } from '../mealPlans/planFulfillment';
 import type { PlanFulfillmentService } from '../mealPlans/planFulfillment.service';
+import { NUTRITION_DECIMAL_PLACES } from '../nutrition/nutrition.engine';
 import { MEAL_PLAN_COLUMNS, type MealPlanRow } from '../mealPlans/mealPlan.dto';
 import { isActive, MEAL_ITEM_COLUMNS, MEAL_LOG_COLUMNS, type MealItemRow, type MealLogRow } from '../meals/meal.dto';
 import { aggregateSnapshots, readSnapshot } from '../meals/meal.snapshot';
@@ -43,7 +46,7 @@ const READ_SCOPES = ['full_management', 'view_only', 'pediatric_weight_managemen
 const PLAN_STATUSES_WITH_INTENT: readonly MealPlanRow['status'][] = ['active', 'completed', 'archived'];
 const SNAPSHOT_COLUMNS =
   'id, profile_id, snapshot_payload, resolver_version, resolved_at, snapshot_reason, linked_event_type, linked_event_id, created_at, local_date, local_timezone, unresolved_fields';
-export const PROGRESS_RULES_VERSION = 'progress-analytics-10b.1';
+export const PROGRESS_RULES_VERSION = 'progress-analytics-10b.2';
 
 function datesBetween(from: string, to: string): string[] {
   const out: string[] = [];
@@ -110,10 +113,13 @@ export class ProgressService {
       source: 'layer_8b_derived_fulfillment' as const,
       plan_count: plans.length,
       counts: countsDto(total),
+      rates: fulfillmentRates(total),
+      // Deprecated (10B closure): kept only for contract compatibility; there
+      // is no combined classification and this is always null.
       fulfilled_item_rate: {
         value: null,
-        status: 'classification_not_approved' as const,
-        note: 'Which fulfillment states count as fulfilled is not yet approved; counts are factual.',
+        status: 'deprecated_no_combined_classification' as const,
+        note: 'Deprecated. No combined fulfillment rate exists; use the separate factual rates.',
       },
       unplanned_actual_item_count: unplanned.size,
       unplanned_actual_items: [...unplanned.values()].sort((a, b) => (a.plan_local_date < b.plan_local_date ? -1 : a.plan_local_date > b.plan_local_date ? 1 : a.id < b.id ? -1 : 1)),
@@ -137,6 +143,34 @@ function countsDto(byState: Record<FulfillmentState, number>) {
     unlinked: byState.unlinked,
     not_comparable: byState.quantity_not_comparable + byState.identity_changed_by_correction,
     by_state: byState,
+  };
+}
+
+/** Layer 8B top-level state -> exactly one rate bucket (no item is counted twice). */
+const RATE_BUCKETS = {
+  exact_fulfillment_rate: ['fulfilled_exact'],
+  substitution_rate: ['fulfilled_with_substitution'],
+  above_planned_quantity_rate: ['above_planned_quantity'],
+  partial_rate: ['partial'],
+  skip_rate: ['skipped'],
+  unlinked_rate: ['unlinked'],
+  not_comparable_rate: ['quantity_not_comparable', 'identity_changed_by_correction'],
+} as const satisfies Record<string, readonly FulfillmentState[]>;
+
+/** Each rate = state count / eligible_current_confirmed_planned_items x 100,
+ * exact, rounded half-up once to 6 places. A zero denominator gives null
+ * rates (not 0%). */
+export function fulfillmentRates(byState: Record<FulfillmentState, number>) {
+  const denominator = FULFILLMENT_STATES.reduce((a, s) => a + byState[s], 0);
+  const rate = (states: readonly FulfillmentState[]) => {
+    const count = states.reduce((a, s) => a + byState[s], 0);
+    const pct: Rational | null = denominator === 0 ? null : div({ n: BigInt(count) * 100n, d: 1n }, { n: BigInt(denominator), d: 1n });
+    return { count, denominator, percentage: pct === null ? null : Number(roundHalfUp(pct, NUTRITION_DECIMAL_PLACES)) };
+  };
+  return {
+    denominator: { name: 'eligible_current_confirmed_planned_items' as const, value: denominator },
+    status: denominator === 0 ? ('no_eligible_planned_items' as const) : ('computed' as const),
+    ...(Object.fromEntries(Object.entries(RATE_BUCKETS).map(([k, states]) => [k, rate(states)])) as Record<keyof typeof RATE_BUCKETS, ReturnType<typeof rate>>),
   };
 }
 

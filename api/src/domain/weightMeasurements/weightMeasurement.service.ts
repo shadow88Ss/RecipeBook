@@ -10,7 +10,10 @@
 // path anywhere — 20260825120400's trg_weight_measurement_prevent_update
 // blocks UPDATE unconditionally at the database layer regardless of RLS,
 // and no DELETE grant/policy exists. A correction is always a new row
-// referencing the one it corrects via corrects_measurement_id.
+// referencing the one it corrects via corrects_measurement_id. At most one
+// row may correct a given measurement (Layer 10B closure; unique index
+// uq_weight_measurement_single_correction), so corrections form a chain:
+// a second direct correction is 409 CONFLICT — correct the latest row.
 
 import { AppError } from '../../lib/errors';
 import { requireProfileScope } from '../../lib/authorize';
@@ -54,7 +57,7 @@ export class WeightMeasurementService {
       }
     }
 
-    const row = await db.insert<WeightMeasurementRow>(
+    const row = await insertMeasurement(() => db.insert<WeightMeasurementRow>(
       'weight_measurement',
       {
         profile_id: profileId,
@@ -66,7 +69,19 @@ export class WeightMeasurementService {
         corrects_measurement_id: input.corrects_measurement_id ?? null,
       },
       WEIGHT_MEASUREMENT_COLUMNS,
-    );
+    ));
     return toWeightMeasurementDto(row);
+  }
+}
+
+/** Maps the single-correction refusal to a safe API error — never the SQL message. */
+async function insertMeasurement<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if ((err as { code?: unknown }).code === '23505') {
+      throw AppError.conflict('This measurement has already been corrected. Correct the latest measurement in its correction chain instead.');
+    }
+    throw err;
   }
 }
