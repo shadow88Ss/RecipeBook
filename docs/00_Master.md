@@ -740,6 +740,16 @@ The UI/coach must be capable of explaining uncertainty where appropriate.
 - **Storage/licensing boundary** per provider: FatSecret allows only listed identifiers (here `food_id`, `serving_id`) to be stored indefinitely and everything else for at most 24 hours; Open Food Facts data is ODbL/DbCL and needs attribution, with share-alike for derivative databases. In this layer nothing from either provider is persisted — only a bounded in-memory cache of normalized candidates (TTL capped by the provider policy) — and raw payloads are never retained or returned. Whether ingestion may store Open Food Facts-derived rows is an open licence decision for that future layer.
 - **Hardening of 11C.** The runtime routing function no longer returns secret-reference names; adapters declare where their credential lives, and admin views show only whether a credential is attached/configured.
 
+## 17.3 Mobile alpha foundation (Phase 4 Layer 12A)
+
+- **Location.** One Expo app in `mobile/` beside `api/` (React Native, Expo SDK 57, TypeScript, Expo Router). It is a standalone npm project: no workspace, no root package and no shared contracts package yet. The §4 monorepo layout (`/apps/mobile`, `/services/api`, `/packages/contracts`) stays the preferred future shape; moving to it is a separate, explicit decision.
+- **Thin client.** The app does presentation, navigation, input, UI state, session handling and `/v1` API calls only. It never calculates nutrition, resolves targets, normalizes barcodes, derives progress or grocery data, and never calls FatSecret, Open Food Facts, WHOOP or retailers. Mobile DTOs are written from `30_API.md` (validated with zod at the boundary); no backend runtime code is imported.
+- **Auth.** Supabase Auth (supabase-js) is the only auth authority and the only direct Supabase use; data never goes through Supabase from the app. The SDK session lives in the iOS Keychain / Android Keystore through a chunked expo-secure-store adapter (device-only, excluded from backups); never AsyncStorage. Every API request reads the current session from Supabase and sends `Authorization: Bearer <access token>`; an API `401` clears the local session and returns to sign-in.
+- **Profiles.** `GET /v1/profiles` drives selection (auto-select when there is one). The selected Profile and its `access_scope` are display context only; the API authorizes every request.
+- **Environments.** `development` / `staging` / `production` from `EXPO_PUBLIC_*` public values only (API base URL, Supabase URL, anon/publishable key, environment id), validated at config load and at startup with no fallback; secret-looking variables, service-role/secret keys and non-HTTPS URLs outside development are refused.
+- **No third-party analytics or crash-reporting SDKs; no admin UI.** The API client refuses `/v1/admin/*`.
+- Details: `mobile/README.md`.
+
 ---
 
 # 18. Error and Confidence Model

@@ -133,7 +133,7 @@ None of the above can be completed from within this repository or this session �
 
 ---
 
-## 13. Mobile Integration Contract (not implemented — no mobile project exists)
+## 13. Mobile Integration Contract (partially implemented — Phase 4 Layer 12A)
 
 No mobile application exists in this repository yet (confirmed by direct inspection — no `package.json`, Expo project, or any application code is present). Per this Layer's scope, no screens or client code are built to "demonstrate" authentication. This section records the contract the eventual mobile client (`22_Mobile_Application.md`, not yet written) must satisfy, so that work starts from an agreed contract rather than inventing one ad hoc:
 
@@ -145,6 +145,15 @@ No mobile application exists in this repository yet (confirmed by direct inspect
 6. Logout calls the SDK's sign-out, then marks the local `DeviceSession` row revoked via an authenticated API call before clearing local session state. Logout-all calls the SDK's global sign-out equivalent and expects the API to have marked every `DeviceSession` row for that Account revoked (§11 of `33_Security_and_Privacy.md`'s RLS input table already permits an Account to update all of its own `DeviceSession` rows in one statement).
 
 This contract is a requirement for whichever future phase builds the mobile project — nothing here is implemented as mobile code.
+
+**Status after Layer 12A (`mobile/`).**
+- Item 1: implemented for email/password with supabase-js. Google and Apple use the same SDK through a PKCE in-app-browser flow that is wired but disabled until the providers are configured in Supabase (§12, external configuration) and listed in `EXPO_PUBLIC_AUTH_OAUTH_PROVIDERS`. Native Sign in with Apple (App Store guideline 4.8) is not built.
+- Item 2: implemented. supabase-js persists its own session through a chunked expo-secure-store adapter (`WHEN_UNLOCKED_THIS_DEVICE_ONLY`, Android backup excluded); the app never stores tokens itself. Refresh is supabase-js's own (auto-refresh while foregrounded; `getSession()` per API request).
+- Item 3: **deferred** — no `DeviceSession` registration endpoint exists in the API yet. Adding one is a backend change outside Layer 12A.
+- Item 4: implemented. Every request sends the Bearer token; profile-scoped calls carry the selected `profile_id` in the path and the server re-authorizes each one. The app never sends an `account_id`.
+- Item 5: not built (no biometric gate yet).
+- Item 6: sign-out calls the SDK's sign-out (global revoke when reachable) and always wipes the secure session and in-memory API cache; the `DeviceSession` revoke waits for item 3.
+- An API `401` is treated as an ended session: the local session is cleared (SDK local sign-out) and the user is returned to sign-in with a notice.
 
 ## 14. Platform administration and identity providers (Phase 3 Layer 11C)
 

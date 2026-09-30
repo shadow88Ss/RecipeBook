@@ -1,0 +1,215 @@
+# MyRecipeBook mobile (alpha foundation)
+
+The iOS and Android app for MyRecipeBook: React Native, Expo SDK 57, TypeScript and Expo Router. This is the Phase 4 Layer 12A foundation: sign-in, Profile selection, Today (Daily Tracker) and Progress connected to the `/v1` API, with the other areas as shells.
+
+> Status: the app has only been tested with mocked Supabase and API responses. It has **not** been run against a live Supabase project or a deployed API, and not on a physical device. See [External configuration still required](#external-configuration-still-required).
+
+## Contents
+
+- [Structure](#structure)
+- [Environment](#environment)
+- [Auth flow](#auth-flow)
+- [API client](#api-client)
+- [Profile context](#profile-context)
+- [Navigation](#navigation)
+- [Today](#today)
+- [Progress](#progress)
+- [Log and barcode](#log-and-barcode)
+- [State](#state)
+- [Secure storage](#secure-storage)
+- [Security rules](#security-rules)
+- [Checks](#checks)
+- [Running on a real phone](#running-on-a-real-phone)
+- [Expo Go or a development build](#expo-go-or-a-development-build)
+- [External configuration still required](#external-configuration-still-required)
+
+## Structure
+
+```
+mobile/
+  app.config.ts          Expo config; validates the environment when Expo loads it
+  .env.example           the public variables (copy to .env.local)
+  src/
+    app/                 routes (Expo Router): _layout, sign-in, select-profile, (app)/(tabs)/…
+    config/              env.js (+ env.d.ts) validation shared by app.config.ts and the app
+    auth/                supabase-js auth client, secure storage adapter, auth service, AuthProvider, OAuth browser
+    api/                 the one API client, error mapping, endpoints, contracts/ (zod DTOs from docs/30_API.md)
+    profile/             ProfileProvider (selection context) and scope labels
+    features/            screens: auth, profile, today, progress, misc (log, more, settings, placeholders)
+    barcode/             barcode architecture (interface + API lookup), no scanner UI yet
+    state/               services wiring, provider tree, TanStack Query client, navigation gate
+    ui/                  theme and UI kit (Screen, Text, Button, Input, Card, Loading/Error/Empty, Notice)
+    i18n/                English catalogue, t(), number formatting, RTL flag
+    lib/                 dates (local day in an IANA zone), redacting dev logger
+  __tests__/             Jest (jest-expo) tests with mocked Supabase Auth and API
+```
+
+It is a standalone npm project next to `api/`. There is no workspace or shared package: the mobile DTOs are written from `docs/30_API.md`, and no backend code is imported. The monorepo layout in `docs/00_Master.md` §4 is still the preferred future shape.
+
+## Environment
+
+All configuration is public, set through `EXPO_PUBLIC_*` variables that Expo compiles into the bundle. Copy `.env.example` to `.env.local` (git-ignored) and fill it in.
+
+| Variable | Required | Notes |
+|---|---|---|
+| `EXPO_PUBLIC_APP_ENV` | yes | `development`, `staging` or `production`. No default. |
+| `EXPO_PUBLIC_API_BASE_URL` | yes | API origin **without** `/v1`. HTTPS required outside development. |
+| `EXPO_PUBLIC_SUPABASE_URL` | yes | The Supabase project for the same environment as the API. |
+| `EXPO_PUBLIC_SUPABASE_ANON_KEY` | yes | The anon JWT or `sb_publishable_…` key. |
+| `EXPO_PUBLIC_AUTH_OAUTH_PROVIDERS` | no | `google`, `apple` (comma-separated) once they are configured in Supabase. |
+
+Validation runs twice: when Expo loads `app.config.ts` (start, export, EAS build), which stops with a list of problems, and when the app starts, which shows a configuration-error screen instead of the app. It never falls back to another environment. It refuses:
+
+- a missing or unknown environment id;
+- non-HTTPS URLs outside development, and `localhost` outside development (a warning in development, because a phone cannot reach it);
+- an API URL that already ends in `/v1`, or contains credentials or a query;
+- a service-role JWT or an `sb_secret_…` key as the anon key;
+- any `EXPO_PUBLIC_*` variable whose name looks like a secret (`SECRET`, `SERVICE_ROLE`, `PASSWORD`, `PRIVATE`, `FATSECRET`, `WHOOP`, `DATABASE_URL`, `JWT`).
+
+**Never put these in the app:** the Supabase service-role/secret key, the database password, the Supabase JWT secret, FatSecret or any provider secret, WHOOP secrets. They belong to the API's server environment only.
+
+Bundle identifiers are placeholders: `com.myrecipebook.app.dev`, `com.myrecipebook.app.staging` and `com.myrecipebook.app`, with matching schemes `myrecipebook-development`, `myrecipebook-staging` and `myrecipebook`.
+
+## Auth flow
+
+Supabase Auth is the only auth authority. The app uses the official `@supabase/supabase-js` client, and only its `auth` module is used (`src/auth/supabaseAuth.ts`); no data goes through Supabase from the app.
+
+- **Launch:** the stored session is restored from secure storage (`getSession`). While that runs, a "Checking your session" screen shows.
+- **Sign in:** email and password through `signInWithPassword`. Errors are mapped to friendly messages; the password is cleared from the form on failure and is never stored or logged. There is no sign-up screen in this layer.
+- **Google / Apple:** a PKCE flow through the in-app browser is wired (`signInWithOAuth` → `openAuthSessionAsync` → `exchangeCodeForSession`), but the buttons only appear when `EXPO_PUBLIC_AUTH_OAUTH_PROVIDERS` lists a provider. Neither provider is configured yet (external configuration), so neither is claimed to work. Native Sign in with Apple is not built.
+- **Refresh:** supabase-js refreshes tokens itself. The app starts auto-refresh while in the foreground and stops it in the background, and reads the session from Supabase for every API request (`getSession` refreshes when needed). There is no second refresh implementation.
+- **Sign out:** the SDK sign-out (revokes the refresh token when the network is available), then the secure session keys are wiped and the in-memory API cache is cleared, even if the network call fails.
+- **API 401:** treated as an ended session. The local session is cleared, cached data is dropped, and the sign-in screen shows "Your session has ended".
+
+Not built yet: `DeviceSession` registration (no API endpoint exists), biometric unlock.
+
+## API client
+
+`src/api/client.ts` is the only way the app calls the backend.
+
+- URL: `${EXPO_PUBLIC_API_BASE_URL}/v1/...`. Only `/v1/` paths are allowed, and `/v1/admin/*` is refused before any network call.
+- Headers: `Authorization: Bearer <Supabase access token>`, `X-Request-Id` (an opaque id), `Accept: application/json`, and `Content-Type: application/json` when there is a body. The account id is never sent.
+- Timeout: 15 seconds by default.
+- Every response body is checked against a zod schema from `src/api/contracts/`. A body that does not match becomes an `invalid_response` error.
+- Errors become an `ApiError` with a `kind`: `validation` (400), `unauthenticated` (401 or no session), `forbidden` (403), `not_found` (404), `conflict` (409), `rate_limited` (429, with `Retry-After`), `unavailable` (503), `server` (500 and others), `timeout`, `offline`, `invalid_response`. Screens show a translated message for the kind and the request id as a reference. Server messages, stack traces and SQL are never shown or kept.
+
+## Profile context
+
+After sign-in the app calls `GET /v1/profiles` (following the pagination cursor).
+
+- One Profile: it is selected automatically.
+- Several: a selection screen lists them with their access scope ("Full access", "View only", "Pediatric care access").
+- None: an empty state.
+
+The context holds only the selected Profile's id, display name and `access_scope` as the API returned it. It is display context, not authorization. The app does not hide or allow anything based on scope: every request carries the Profile id in the path and the API decides. A selection belongs to the user who made it, so another user never inherits it.
+
+## Navigation
+
+The root layout (`src/app/_layout.tsx`) uses `Stack.Protected` guards driven by `navigationGate()`:
+
+- **Auth flow:** `sign-in`.
+- **Profile selection:** `select-profile` (signed in, no Profile chosen).
+- **App flow:** tabs for Today, Log, Progress, More and Profile. More opens Recipes, Meal plan and Grocery list, which are placeholders in this layer.
+
+## Today
+
+`GET /v1/profiles/{id}/daily-tracker?date=&timezone=` for the device's local day and IANA time zone, with previous/next-day buttons (never past today).
+
+- Shows energy, protein, carbohydrate, fat and fiber exactly as the API reports them.
+- Coverage is always spelled out: "Complete", "Partial: 2 of 3 items have data", or "No data available".
+- An unknown value shows "Not available", never 0. A day with nothing logged shows the API's known zeros and "Nothing logged for this day."
+- The target line keeps the API's context: current targets, targets saved for this day, or "Targets for this day were not saved, so there is no comparison".
+- Comparison wording comes from the API's `comparison_status` and its numbers (`remaining`, `remaining_at_most`, `over_target_by`, `over_target_by_at_least`). The app does no nutrition arithmetic.
+
+## Progress
+
+`GET /v1/profiles/{id}/progress?from=&to=&timezone=` for the last 7 local days. It shows three separate sections, as reported:
+
+- **Meal plan follow-through:** each rate's count, denominator and percentage, or "No confirmed planned items" when there are none.
+- **Nutrition against saved daily targets:** days with food and with saved targets, and per nutrient the comparable days and the average percentage of target (comparable days only).
+- **Weight:** first and latest measurement, change, and the difference from goal weight.
+
+There is no combined score and no judgement wording. The contract rejects a non-null `combined_score`.
+
+## Log and barcode
+
+The Log tab is a shell in 12A. `src/barcode/barcode.ts` defines the architecture for Layer 12B: a `BarcodeSource` (camera scanner or manual entry) produces the raw scanned string, and `lookupBarcode()` sends it unchanged to `GET /v1/products/barcode/{code}/lookup`. The API normalizes the code and does the internal-first provider lookup; the app never normalizes barcodes or calls a product provider.
+
+## State
+
+- **Auth state** (`AuthProvider`): status, user id and email only. Tokens stay inside supabase-js.
+- **Selected Profile** (`ProfileProvider`): kept in memory.
+- **Server state:** TanStack Query, in memory only (never persisted). It provides loading, error, retry and cancellation without hand-written caching. The cache is never authoritative and is cleared on sign-out and on a 401. `invalidateAfterNutritionWrite()` re-reads a Profile's Daily Tracker and Progress after writes (for Layer 12B onwards).
+- **UI state:** local to each screen.
+
+## Secure storage
+
+`src/auth/secureStorage.ts` is the storage adapter supabase-js uses for its session.
+
+- Values go to the iOS Keychain / Android Keystore through `expo-secure-store`, never AsyncStorage.
+- A session is split into chunks of up to 1,800 characters. The chunk count is written last, so a partial write reads as "no session" rather than a corrupted one.
+- Items use `WHEN_UNLOCKED_THIS_DEVICE_ONLY`: readable only when the device is unlocked, and never migrated to another device.
+- Android backup is disabled (`allowBackup: false` and the secure-store plugin's backup rules).
+- Sign-out and a 401 wipe every session key.
+
+## Security rules
+
+- No service-role, secret or provider key in the app; the config refuses them.
+- No direct calls to FatSecret, Open Food Facts, WHOOP or retailers.
+- No admin UI and no admin API calls.
+- No third-party analytics or crash-reporting SDKs.
+- No `console` logging except the development-only logger in `src/lib/logger.ts`, which drops everything in release builds and redacts token, password, secret, session and email fields. Nutrition payloads are never logged.
+- TLS verification is never disabled. Hosted environments must use HTTPS.
+
+`__tests__/security.test.ts` checks these rules against the source and `package.json`, and ESLint blocks Supabase imports outside `src/auth`.
+
+## Checks
+
+```bash
+cd mobile
+npm install
+npm run typecheck        # tsc --noEmit
+npm run lint             # eslint (expo config + project rules)
+npm test                 # jest (jest-expo); mocked Supabase Auth and API only
+# Expo config and bundles need a valid environment:
+EXPO_PUBLIC_APP_ENV=development EXPO_PUBLIC_API_BASE_URL=http://192.168.1.20:3000 \
+EXPO_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co EXPO_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_x \
+  npx expo export --platform ios --platform android
+```
+
+## Running on a real phone
+
+You need Node 20.19+ (22 LTS recommended), the Expo Go app from the App Store or Play Store (SDK 57), the phone and computer on the same Wi‑Fi, and a reachable API and Supabase project for the same environment.
+
+1. **Backend.** Run the API (`cd api && npm install && npm run dev`) against a Supabase project, or use a hosted API. The phone cannot reach `localhost`:
+   - on the same Wi‑Fi in development, use the computer's LAN address, for example `http://192.168.1.20:3000`, and make sure the API listens on all interfaces and the firewall allows port 3000;
+   - better, use a hosted development API with HTTPS (required for staging and production).
+2. **Configure.** `cp .env.example .env.local` and set the four variables. The Supabase URL and anon key must be for the same project whose JWT secret the API uses.
+3. **Install and start.** `npm install`, then `npx expo start`. If the phone cannot reach Metro on the LAN, use `npx expo start --tunnel`.
+4. **iPhone.** Open the Camera app, scan the QR code in the terminal, and open it in Expo Go.
+5. **Android.** Open Expo Go and scan the QR code.
+6. **Use it.** Sign in with an email/password user that exists in that Supabase project (the account provisioning trigger creates the Account and first Profile). With one Profile the app opens Today; with several it asks which one first.
+
+Troubleshooting:
+
+- "App configuration problem": a variable is missing or invalid. Fix `.env.local` and restart Expo with `npx expo start -c`.
+- "You appear to be offline": the phone cannot reach the API URL. Check the LAN IP, the port and the firewall.
+- Every request ends with "Your session has ended": the API is rejecting the Supabase token. Check that the API's `SUPABASE_JWT_SECRET` belongs to the same project (see the signing-key risk below).
+
+## Expo Go or a development build
+
+**Expo Go is the target for the alpha.** Every native module used (expo-router, expo-secure-store, expo-localization, expo-web-browser, expo-linking, expo-constants, react-native-safe-area-context, react-native-screens) ships in Expo Go SDK 57, and the rest is JavaScript (supabase-js, TanStack Query, zod).
+
+- Secure storage works in Expo Go: values go to the Keychain / Keystore under Expo Go's own app identity. The placeholder bundle id, the Android backup exclusion and the app's own URL scheme only take effect in a development or store build.
+- In Expo Go, the OAuth redirect is an `exp://` URL, which would have to be allowed in Supabase. Google/Apple are disabled for now anyway.
+
+**Development build:** the config is ready (`app.config.ts`, placeholder ids, config plugins) for `npx expo run:ios` / `npx expo run:android` or `npx eas-cli build --profile development`. No `eas.json`, signing credentials or store accounts exist yet, and nothing has been built or published.
+
+## External configuration still required
+
+- **A Supabase project per environment** (at least development): URL and anon/publishable key for the app, and the JWT secret, URL and anon key for the API. None exists yet (`docs/37_Authentication_and_Login.md` §12).
+- **A reachable API** for the phone: a LAN address in development, or a hosted HTTPS deployment. None is deployed.
+- **Signing-key risk:** the API verifies HS256 tokens with the legacy `SUPABASE_JWT_SECRET`. New Supabase projects default to asymmetric JWT signing keys, and the API would then reject every token. Check the project's JWT settings before connecting, or plan an additive API change to verify through the project's JWKS.
+- **Google and Apple sign-in:** provider apps and credentials, Supabase provider settings and redirect URLs (the app's scheme and, for Expo Go, the `exp://` URL), then `EXPO_PUBLIC_AUTH_OAUTH_PROVIDERS`. Apple also expects native Sign in with Apple on iOS when other social logins are offered.
+- **Store identities:** real bundle ids, Apple Developer and Play Console accounts, `eas.json` and signing.
+- **`DeviceSession` registration:** needs an API endpoint first.
