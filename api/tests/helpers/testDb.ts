@@ -15,6 +15,10 @@ const DEFAULT_TEST_DB_NAME = 'recipebook_api_test';
 export const MIGRATIONS_DIR = path.resolve(__dirname, '../../../supabase/migrations');
 const SHIM_FILE = path.resolve(__dirname, '../fixtures/auth-shim.sql');
 const SHIM_AFTER_MIGRATION = '20260825120900_audit_event.sql';
+// Applied before the first migration: a hosted Supabase project's default
+// privileges (auto-grants to anon/authenticated/service_role), so privilege
+// drift shows up locally, not first on a live project.
+const SUPABASE_DEFAULT_PRIVILEGES_FILE = path.resolve(__dirname, '../fixtures/supabase-default-privileges.sql');
 
 function testDbUrl(dbName: string): string {
   const url = new URL(ADMIN_URL);
@@ -50,6 +54,7 @@ export async function rebuildTestDatabase(dbName: string = DEFAULT_TEST_DB_NAME,
       .filter((f) => f.endsWith('.sql'))
       .sort()
       .filter((f) => !options.stopBeforeMigration || f < options.stopBeforeMigration);
+    await client.query(await readFile(SUPABASE_DEFAULT_PRIVILEGES_FILE, 'utf8'));
     for (const file of files) {
       const sql = await readFile(path.join(MIGRATIONS_DIR, file), 'utf8');
       await client.query(sql);

@@ -26,7 +26,7 @@ Status when this was written: **none of it exists yet.** No Supabase project, no
 
 ## 2. Apply the migrations
 
-The schema is defined only by `supabase/migrations/` (45 files). Never recreate objects by hand in the dashboard.
+The schema is defined only by `supabase/migrations/` (46 files). Never recreate objects by hand in the dashboard.
 
 ```bash
 npm install -g supabase            # or: npx supabase@latest …
@@ -34,25 +34,113 @@ cd <repo root>
 supabase init                      # creates supabase/config.toml; keep the existing migrations
 supabase login
 supabase link --project-ref <ref>  # asks for the database password (secret; not stored in the repo)
-supabase db push --dry-run         # review: must list all 45 migrations, in order
+supabase db push --dry-run         # review: must list exactly the migrations not yet applied, in order
 supabase db push
 supabase migration list            # local and remote columns must match
 ```
 
-Verify in the SQL editor. These are read-only queries.
+`supabase init` also creates `supabase/.gitignore` and `supabase/config.toml`. They are local environment configuration: do not commit them.
+
+### 2.1 Supabase default privileges (why migration 46 exists)
+
+A hosted Supabase project runs `alter default privileges for role postgres in schema public grant all on tables, functions, sequences to anon, authenticated, service_role`. Every object that migrations 1-45 create therefore also gets ALL for `anon` and `authenticated`, on top of the explicit grants in each migration. `revoke … from public` does not remove a direct role grant.
+
+On the first DEV deployment (Layer 12A.1), this gave `anon` the following, which the local chain never had:
+
+- table privileges on every table (RLS still filtered the rows, since every policy is `to authenticated`);
+- EXECUTE on internal helpers such as `meal_item_chain_root` and `enabled_provider_routes`.
+
+`20261014120000_align_supabase_default_privileges.sql` changes privileges only. It:
+
+- revokes those default privileges for future objects;
+- revokes every direct privilege that `anon` and `authenticated` hold on public tables, sequences and routines;
+- re-grants exactly the validated set.
+
+It does not touch `service_role`.
+
+Since that migration, the local harness applies `api/tests/fixtures/supabase-default-privileges.sql` before the first migration, so the local chain is built under the same defaults. `tests/integration/layer12a1.privileges.test.ts` pins the model below, and it fails if migration 46 is removed. **New migrations must keep granting explicitly** (`revoke … from public` plus `grant … to authenticated`). Nothing is granted automatically any more.
+
+### 2.2 Verify the live schema (read-only; SQL editor)
 
 ```sql
--- tables with RLS enabled (every app table must show rowsecurity = true)
-select tablename, rowsecurity from pg_tables where schemaname = 'public' order by 1;
--- policies exist
-select tablename, count(*) from pg_policies where schemaname = 'public' group by 1 order by 1;
--- the auth provisioning trigger (on auth.identities, 37_Auth §11)
-select tgname from pg_trigger where tgrelid = 'auth.identities'::regclass and not tgisinternal;  -- on_auth_identity_created
--- functions
-select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' order by 1;
+with t as (select c.oid, c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'r'),
+f as (select p.oid, p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as sig, p.prosecdef, p.prorettype = 'trigger'::regtype as is_trigger from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public'),
+privs as (select unnest(array['SELECT','INSERT','UPDATE','DELETE']) as priv)
+select 'A tables' as check_name, count(*)::text as value from t
+union all select 'B tables_without_rls', coalesce(string_agg(relname, ',' order by relname), 'none') from t where not relrowsecurity
+union all select 'C policies', count(*)::text from pg_policies where schemaname = 'public'
+union all select 'D policy_fingerprint', md5(string_agg(tablename || '|' || policyname || '|' || cmd || '|' || array_to_string(roles, '+'), ',' order by tablename, policyname)) from pg_policies where schemaname = 'public'
+union all select 'E functions', count(*)::text from f
+union all select 'F function_fingerprint', md5(string_agg(sig || '|' || prosecdef, ',' order by sig)) from f
+union all select 'G triggers', count(*)::text from pg_trigger tg join t on t.oid = tg.tgrelid where not tg.tgisinternal
+union all select 'H trigger_fingerprint', md5(string_agg(t.relname || '|' || tg.tgname, ',' order by t.relname, tg.tgname)) from pg_trigger tg join t on t.oid = tg.tgrelid where not tg.tgisinternal
+union all select 'I auth_identities_triggers', coalesce(string_agg(tgname, ',' order by tgname), 'none') from pg_trigger where tgrelid = 'auth.identities'::regclass and not tgisinternal
+union all select 'J anon_table_privileges', count(*)::text from t, privs where has_table_privilege('anon', t.oid, privs.priv)
+union all select 'K authenticated_table_privileges', count(*)::text from t, privs where has_table_privilege('authenticated', t.oid, privs.priv)
+union all select 'L authenticated_privilege_fingerprint', md5(string_agg(t.relname || '|' || privs.priv, ',' order by t.relname, privs.priv)) from t, privs where has_table_privilege('authenticated', t.oid, privs.priv)
+union all select 'M anon_executable_functions', count(*)::text from f where not is_trigger and has_function_privilege('anon', f.oid, 'EXECUTE')
+union all select 'N authenticated_executable_functions', coalesce(string_agg(sig, ', ' order by sig), 'none') from f where not is_trigger and has_function_privilege('authenticated', f.oid, 'EXECUTE')
+
+union all select 'O default_privileges_to_anon_or_authenticated', coalesce(string_agg(distinct case d.defaclnamespace when 0 then 'all_schemas' else 'public' end || ':' || d.defaclobjtype::text || ':' || x.grantee::regrole::text, ','), 'none') from pg_default_acl d cross join aclexplode(d.defaclacl) x where d.defaclrole = 'postgres'::regrole and d.defaclnamespace in (0, 'public'::regnamespace) and x.grantee in ('anon'::regrole, 'authenticated'::regrole)
+order by 1;
 ```
 
-If `db push` fails, or RLS or grants differ from the local chain: **stop.** Do not patch the schema in the dashboard, and report it. This is a stop condition of Layer 12A.1.
+Expected (identical for a clean local build and for the live project):
+
+| Check | Expected |
+|---|---|
+| A tables | `56` |
+| B tables_without_rls | `none` |
+| C policies | `139` |
+| D policy_fingerprint | `9dabbfc03377a67fe0e18541b05ccd77` |
+| E functions | `69` |
+| F function_fingerprint | `5e87f01de9c92c62c6eb1a6564564f49` |
+| G triggers | `83` |
+| H trigger_fingerprint | `141516ac388d47733b9c5994a076c3d5` |
+| I auth_identities_triggers | `on_auth_identity_created` |
+| J anon_table_privileges | `0` |
+| K authenticated_table_privileges | `117` |
+| L authenticated_privilege_fingerprint | `a955e41b8f25396d503190c33ac443f1` |
+| M anon_executable_functions | `2` (the two `gtin_*` helpers) |
+| N authenticated_executable_functions | the 20 functions below |
+| O default_privileges_to_anon_or_authenticated | `none` |
+
+N, in order:
+
+- `admin_register_external_provider(p_provider jsonb)`
+- `admin_update_external_provider(p_provider_key text, p_change jsonb)`
+- `can_manage_recipe(target_recipe_id uuid)`
+- `can_read_recipe(target_recipe_id uuid)`
+- `confirm_meal_plan(p_profile_id uuid, p_meal_plan_id uuid, p_payload jsonb)`
+- `correct_meal_item(p_profile_id uuid, p_meal_log_id uuid, p_original_id uuid, p_item jsonb, p_correction_reason text)`
+- `create_recipe_version(p_profile_id uuid, p_recipe_id uuid, p_expected_current_version_id uuid, p_content jsonb)`
+- `current_account_id()`
+- `enabled_provider_routes(p_family provider_family, p_capability text)`
+- `external_provider_audit_history(p_provider_id uuid)`
+- `external_provider_connection_counts()`
+- `generate_grocery_list(p_profile_id uuid, p_meal_plan_id uuid, p_payload jsonb)`
+- `gtin_check_digit_valid(p_code text)`
+- `gtin_is_product_identity(p_gtin text)`
+- `is_child_profile_created_by_caller(target_profile_id uuid)`
+- `is_platform_admin()`
+- `log_meal_items(p_profile_id uuid, p_meal_log_id uuid, p_payload jsonb)`
+- `profile_access_scope(target_profile_id uuid)`
+- `search_foods(p_query text, p_locales text[], p_limit integer)`
+- `write_planned_meal_items(p_profile_id uuid, p_meal_plan_id uuid, p_meal_plan_day_id uuid, p_planned_meal_id uuid, p_payload jsonb)`
+
+With only migrations 1-45 applied, a hosted project shows the following. This is the drift:
+
+| Check | Value |
+|---|---|
+| J | `224` |
+| K | `224` |
+| L | `8e7cd9bc14eed06fb886058d1d4df6f3` |
+| M | `26` |
+| O | six entries |
+
+A-I are unchanged.
+
+If `db push` fails, or any value differs from the expected table: **stop.** Do not patch the schema or grants in the dashboard, and report it. This is a stop condition of Layer 12A.1.
 
 ## 3. Test users (normal Supabase Auth)
 
@@ -192,7 +280,7 @@ Update this table when a live run happens: record the date, and the device and O
 | Daily Tracker | MOCK VERIFIED ONLY | same |
 | Progress | MOCK VERIFIED ONLY | same |
 | Real-project RLS | NOT TESTED | live smoke §28 block |
-| Migrations on Supabase | NOT TESTED | local chain from zero only |
+| Migrations on Supabase | PARTIAL (DEV) | 45 migrations applied to DEV; privilege drift found (§2.1); migration 46 and re-verification pending |
 | Physical iPhone | NOT TESTED | §7 checklist |
 | Physical Android | NOT TESTED | §7 checklist |
 | Development build (EAS) | NOT TESTED | §8 |
