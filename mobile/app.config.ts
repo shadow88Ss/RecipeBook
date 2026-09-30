@@ -32,6 +32,10 @@ const config: ExpoConfig = {
   orientation: 'portrait',
   icon: './assets/icon.png',
   userInterfaceStyle: 'light',
+  // Alpha targets iOS and Android only. Web is intentionally not a target of this
+  // consumer app (react-native-web is not installed); a web app — e.g. the future
+  // Platform Admin dashboard, or consumer web — is a separately reviewed decision.
+  platforms: ['ios', 'android'],
   ios: {
     // Placeholder identifier; replace once the Apple developer account exists.
     bundleIdentifier: `com.myrecipebook.app${suffix}`,
@@ -50,7 +54,6 @@ const config: ExpoConfig = {
     // Keep the secure-store session out of Android Auto Backup.
     allowBackup: false,
   },
-  web: { favicon: './assets/favicon.png' },
   plugins: [
     'expo-router',
     ['expo-secure-store', { configureAndroidBackup: true, faceIDPermission: false }],

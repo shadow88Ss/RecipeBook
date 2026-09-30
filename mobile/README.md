@@ -178,6 +178,10 @@ EXPO_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co EXPO_PUBLIC_SUPABA
   npx expo export --platform ios --platform android
 ```
 
+**Platforms:** the alpha consumer app targets **iOS and Android only** (`platforms: ['ios', 'android']` in `app.config.ts`). Web is intentionally not a target and `react-native-web` is not installed, so a plain `npx expo export` exports the two native bundles. A web application (the future Platform Admin dashboard, or consumer web later) is a separately reviewed decision.
+
+On a machine whose network blocks `api.expo.dev`, run Expo CLI with `EXPO_OFFLINE=1` (bundling needs no network; dependency validation is skipped). Pass placeholder values on the command line as above — never write them to `.env` files that could be committed.
+
 ## Running on a real phone
 
 You need Node 20.19+ (22 LTS recommended), the Expo Go app from the App Store or Play Store (SDK 57), the phone and computer on the same Wi‑Fi, and a reachable API and Supabase project for the same environment.

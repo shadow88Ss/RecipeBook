@@ -26,7 +26,8 @@ const apiCalls = (calls: Call[]) => calls.filter((c) => new URL(c.url).host === 
 describe('auth flow and profile selection (§20, §22–23)', () => {
   it('shows the sign-in screen when no session is stored', async () => {
     await renderApp(today, { signedIn: false });
-    expect(await screen.findByTestId('sign-in-screen')).toBeTruthy();
+    // renderApp resolves only after auth has settled: the gate is already decided.
+    expect(screen.getByTestId('sign-in-screen')).toBeTruthy();
     expect(screen.getByText('Google and Apple sign-in are not available in this build yet.')).toBeTruthy();
   });
 
