@@ -9,7 +9,9 @@
 // the caller under RLS.
 //
 // Logging: the server computes each item's nutrition FIRST (Layer 5B for a
-// Food, Layer 6A per-serving x servings for an exact RecipeVersion), stores
+// Food, Layer 6A per-serving x servings for an exact RecipeVersion, Layer
+// 11A label nutrition for an exact Product + ProductLabelVersion — see
+// meal.product.ts), stores
 // it as the item's immutable snapshot, and writes the MealLog and items
 // atomically via log_meal_items() — directly as `consumed` (the
 // draft -> planned -> confirmed path is for planning, not recording what
@@ -38,6 +40,7 @@ import {
   type MealLogRow,
 } from './meal.dto';
 import type { MealCreateInput, MealItemCorrectInput, MealItemInput, MealItemsAddInput, MealListQuery } from './meal.schemas';
+import { prepareProductItem } from './meal.product';
 import { buildFoodSnapshot, buildRecipeSnapshot, type MealItemSnapshot } from './meal.snapshot';
 import { isInFuture, localDateOf } from './meal.time';
 
@@ -50,6 +53,10 @@ interface PreparedItem {
   food_serving_id: string | null;
   unit: string | null;
   recipe_version_id: string | null;
+  product_id?: string | null;
+  product_label_version_id?: string | null;
+  product_serving_id?: string | null;
+  logged_via_barcode_id?: string | null;
   quantity: number;
   consumed_at: string;
   nutrition_snapshot: MealItemSnapshot;
@@ -61,7 +68,7 @@ interface MealDay {
   local_timezone: string;
 }
 
-type Issue = { path: string; message: string };
+type Issue = { path: string; message: string; reason?: string };
 
 export class MealService {
   constructor(private readonly dbFactory: ScopedDbFactory) {}
@@ -171,7 +178,18 @@ export class MealService {
     if (original.status !== 'consumed') throw AppError.conflict('Only a consumed meal item can be corrected.');
     if (original.superseded_by_meal_item_id !== null) throw AppError.conflict('This meal item has already been corrected.');
 
-    const [prepared] = await prepareItems(db, profileId, [input.item], mealDay(log), original.consumed_at ?? undefined, 'item', false);
+    const [prepared] = await prepareItems(
+      db,
+      profileId,
+      [input.item],
+      mealDay(log),
+      original.consumed_at ?? undefined,
+      'item',
+      false,
+      original.product_id !== null && original.product_label_version_id !== null
+        ? { product_id: original.product_id, product_label_version_id: original.product_label_version_id }
+        : undefined,
+    );
     if (!prepared) throw AppError.internal();
     const written = await callWrite(() =>
       db.rpc<{ meal_item_id: string }>('correct_meal_item', {
@@ -208,6 +226,7 @@ async function prepareItems(
   defaultConsumedAt: string | undefined,
   path: string,
   indexed = true,
+  original?: { product_id: string; product_label_version_id: string },
 ): Promise<PreparedItem[]> {
   const at = (i: number, field: string) => (indexed ? `${path}.${i}.${field}` : `${path}.${field}`);
   const issues: Issue[] = [];
@@ -231,7 +250,28 @@ async function prepareItems(
   const { foods, vocabulary } = await loadNutritionReference(db, foodIds);
 
   const prepared: Array<PreparedItem | null> = [];
+  const barcodesNotFound: string[] = [];
+  const productsWithoutLabel: string[] = [];
+  const confirmations: Array<Record<string, unknown>> = [];
   for (const [i, input] of inputs.entries()) {
+    if (input.type === 'product') {
+      const result = await prepareProductItem(db, input, {
+        path: indexed ? `${path}.${i}` : path,
+        consumedAt: consumedAt[i] ?? '',
+        consumedLocalDate: consumedAt[i] ? localDateOf(consumedAt[i], day.local_timezone) : day.logged_date,
+        vocabulary,
+        ...(original ? { original } : {}),
+      });
+      if (result.kind === 'prepared') prepared.push(result.item);
+      else {
+        prepared.push(null);
+        if (result.kind === 'issue') issues.push({ path: result.path, message: result.message, ...(result.reason ? { reason: result.reason } : {}) });
+        else if (result.kind === 'barcode_not_found') barcodesNotFound.push(result.path);
+        else if (result.kind === 'no_label') productsWithoutLabel.push(result.path);
+        else confirmations.push(result.details);
+      }
+      continue;
+    }
     if (input.type === 'food') {
       const food = foods.get(input.food_id);
       if (!food) {
@@ -314,7 +354,19 @@ async function prepareItems(
     });
   }
 
-  if (issues.length) throw AppError.validation('Invalid meal item.', { issues });
+  if (issues.length) {
+    const reason = issues.find((issue) => issue.reason)?.reason;
+    throw AppError.validation('Invalid meal item.', { issues, ...(reason ? { reason } : {}) });
+  }
+  // Layer 11A rule: a retired or unknown barcode is simply not found.
+  if (barcodesNotFound.length) throw AppError.notFound('No product has this barcode.');
+  if (productsWithoutLabel.length) {
+    throw AppError.conflict('This product has no label version, so its consumption cannot be calculated.', { reason: 'product_has_no_label_version', paths: productsWithoutLabel });
+  }
+  // Approved G1: an ambiguous backdated label is confirmed by the user, never guessed.
+  if (confirmations.length) {
+    throw AppError.conflict('Confirm which product label version applied when this was consumed.', { reason: 'label_version_confirmation_required', items: confirmations });
+  }
   return prepared.filter((p): p is PreparedItem => p !== null);
 }
 

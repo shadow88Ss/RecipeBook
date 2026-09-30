@@ -319,9 +319,12 @@ function snapshotOfActual(item: MealItemRow): MealItemSnapshot {
 }
 
 function actualAmountDto(item: MealItemRow) {
-  return item.recipe_version_id !== null
-    ? { servings: item.quantity }
-    : { quantity: item.quantity, unit: item.unit, serving_id: item.food_serving_id };
+  if (item.recipe_version_id !== null) return { servings: item.quantity };
+  // Layer 11B: an exact Product actual (only ever a substitution for a planned Food/Recipe).
+  if (item.product_id !== null) {
+    return { product_id: item.product_id, product_label_version_id: item.product_label_version_id, quantity: item.quantity, unit: item.unit, product_serving_id: item.product_serving_id };
+  }
+  return { quantity: item.quantity, unit: item.unit, serving_id: item.food_serving_id };
 }
 
 export function deriveItemFulfillment(ctx: PlannedItemContext) {

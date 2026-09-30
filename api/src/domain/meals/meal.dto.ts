@@ -10,7 +10,8 @@ import { aggregateSnapshots, readSnapshot, type MealItemSnapshot } from './meal.
 
 export const MEAL_LOG_COLUMNS = 'id, profile_id, meal_type, logged_date, local_timezone, notes, created_at, updated_at';
 export const MEAL_ITEM_COLUMNS =
-  'id, meal_log_id, profile_id, food_id, food_serving_id, unit, recipe_version_id, quantity, status, consumed_at, ' +
+  'id, meal_log_id, profile_id, food_id, food_serving_id, unit, recipe_version_id, ' +
+  'product_id, product_label_version_id, product_serving_id, logged_via_barcode_id, quantity, status, consumed_at, ' +
   'status_changed_by_actor_type, corrects_meal_item_id, superseded_by_meal_item_id, correction_reason, ' +
   'nutrition_snapshot, nutrition_calculation_version, nutrition_calculated_at, created_at';
 
@@ -33,6 +34,10 @@ export interface MealItemRow {
   food_serving_id: string | null;
   unit: string | null;
   recipe_version_id: string | null;
+  product_id: string | null;
+  product_label_version_id: string | null;
+  product_serving_id: string | null;
+  logged_via_barcode_id: string | null;
   quantity: number;
   status: string;
   consumed_at: string | null;
@@ -71,13 +76,37 @@ function itemNutrition(item: MealItemRow, snapshot: MealItemSnapshot | null, det
   };
 }
 
+/** Food, Recipe or (Layer 11B) Product — from the row's identity columns. */
+export function sourceTypeOf(item: Pick<MealItemRow, 'recipe_version_id' | 'product_id'>): 'food' | 'recipe' | 'product' {
+  return item.recipe_version_id !== null ? 'recipe' : item.product_id !== null ? 'product' : 'food';
+}
+
+/** Amount as recorded: servings of a recipe, or quantity + unit | serving. */
+export function mealItemAmountDto(item: MealItemRow, source?: MealItemSnapshot['source']) {
+  if (item.recipe_version_id !== null) return { servings: item.quantity };
+  if (item.product_id !== null) {
+    return {
+      quantity: item.quantity,
+      unit: item.unit,
+      product_serving_id: item.product_serving_id,
+      serving_description: source?.type === 'product' ? (source.serving?.description ?? null) : null,
+    };
+  }
+  return {
+    quantity: item.quantity,
+    unit: item.unit,
+    serving_id: item.food_serving_id,
+    serving_description: source?.type === 'food' ? (source.serving?.description ?? null) : null,
+  };
+}
+
 export function toMealItemDto(item: MealItemRow, options: { detail: boolean } = { detail: false }) {
   const snapshot = snapshotOf(item);
   const source = snapshot?.source;
   return {
     id: item.id,
     meal_log_id: item.meal_log_id,
-    source_type: item.recipe_version_id !== null ? ('recipe' as const) : ('food' as const),
+    source_type: sourceTypeOf(item),
     food:
       item.food_id !== null
         ? { food_id: item.food_id, canonical_name: source?.type === 'food' ? source.canonical_name : null }
@@ -91,15 +120,22 @@ export function toMealItemDto(item: MealItemRow, options: { detail: boolean } = 
             title: source?.type === 'recipe' ? source.title : null,
           }
         : null,
-    amount:
-      item.recipe_version_id !== null
-        ? { servings: item.quantity }
-        : {
-            quantity: item.quantity,
-            unit: item.unit,
-            serving_id: item.food_serving_id,
-            serving_description: source?.type === 'food' ? (source.serving?.description ?? null) : null,
-          },
+    product:
+      item.product_id !== null
+        ? {
+            product_id: item.product_id,
+            brand_name: source?.type === 'product' ? source.brand_name : null,
+            product_name: source?.type === 'product' ? source.product_name : null,
+            variant_name: source?.type === 'product' ? source.variant_name : null,
+            market: source?.type === 'product' ? source.market : null,
+            product_label_version_id: item.product_label_version_id,
+            label_version_number: source?.type === 'product' ? source.label_version.version_number : null,
+            label_authority: source?.type === 'product' ? source.label_version.authority : null,
+            label_version_selection: source?.type === 'product' ? source.label_version_selection : null,
+            logged_via_barcode: item.logged_via_barcode_id !== null && source?.type === 'product' && source.barcode ? { canonical_gtin: source.barcode.canonical_gtin } : null,
+          }
+        : null,
+    amount: mealItemAmountDto(item, source),
     status: item.status,
     consumed_at: item.consumed_at,
     created_at: item.created_at,

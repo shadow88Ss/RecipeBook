@@ -35,7 +35,7 @@ export const PRODUCT_NUTRITION_VERSION = 'product-nutrition-11a.1';
 
 type NutritionSource = 'manufacturer_label' | 'third_party_product_database';
 
-interface ProductRow {
+export interface ProductRow {
   id: string;
   brand_name: string;
   product_name: string;
@@ -52,10 +52,10 @@ interface ProductRow {
   created_at: string;
   updated_at: string;
 }
-const PRODUCT_COLUMNS =
+export const PRODUCT_COLUMNS =
   'id, brand_name, product_name, variant_name, manufacturer_name, market, package_quantity, package_unit, food_id, status, current_label_version_id, source, provenance_reference, created_at, updated_at';
 
-interface LabelVersionRow {
+export interface LabelVersionRow {
   id: string;
   product_id: string;
   version_number: number;
@@ -67,9 +67,9 @@ interface LabelVersionRow {
   superseded_by_label_version_id: string | null;
   created_at: string;
 }
-const LABEL_COLUMNS = 'id, product_id, version_number, status, nutrition_source, provenance_reference, effective_from, superseded_at, superseded_by_label_version_id, created_at';
+export const LABEL_COLUMNS = 'id, product_id, version_number, status, nutrition_source, provenance_reference, effective_from, superseded_at, superseded_by_label_version_id, created_at';
 
-interface ProductNutrientRow {
+export interface ProductNutrientRow {
   id: string;
   label_version_id: string;
   nutrient_id: string;
@@ -79,9 +79,9 @@ interface ProductNutrientRow {
   source: NutritionSource;
   provenance_reference: string | null;
 }
-const NUTRIENT_COLUMNS = 'id, label_version_id, nutrient_id, amount, basis_quantity, basis_unit, source, provenance_reference';
+export const NUTRIENT_COLUMNS = 'id, label_version_id, nutrient_id, amount, basis_quantity, basis_unit, source, provenance_reference';
 
-interface ProductServingRow {
+export interface ProductServingRow {
   id: string;
   label_version_id: string;
   serving_description: string;
@@ -90,9 +90,9 @@ interface ProductServingRow {
   source: NutritionSource;
   provenance_reference: string | null;
 }
-const SERVING_COLUMNS = 'id, label_version_id, serving_description, canonical_quantity, canonical_unit, source, provenance_reference';
+export const SERVING_COLUMNS = 'id, label_version_id, serving_description, canonical_quantity, canonical_unit, source, provenance_reference';
 
-interface BarcodeRow {
+export interface BarcodeRow {
   id: string;
   product_id: string;
   gtin: string;
@@ -104,7 +104,7 @@ interface BarcodeRow {
   provenance_reference: string | null;
   created_at: string;
 }
-const BARCODE_COLUMNS = 'id, product_id, gtin, barcode_type, submitted_code, status, retired_at, source, provenance_reference, created_at';
+export const BARCODE_COLUMNS = 'id, product_id, gtin, barcode_type, submitted_code, status, retired_at, source, provenance_reference, created_at';
 
 /** Identity-scoped authority of Product label data (G3). */
 export function productAuthorityOf(source: NutritionSource): 'exact_product' | 'non_authoritative_product_source' {
@@ -113,7 +113,7 @@ export function productAuthorityOf(source: NutritionSource): 'exact_product' | '
 
 const num = (v: number | string | null) => (v === null ? null : Number(v));
 const cmp = (a: string | null, b: string | null) => (a === b ? 0 : a === null ? -1 : b === null ? 1 : a < b ? -1 : 1);
-const displayName = (p: ProductRow) => [p.brand_name, p.product_name, p.variant_name].filter(Boolean).join(' ');
+export const displayName = (p: ProductRow) => [p.brand_name, p.product_name, p.variant_name].filter(Boolean).join(' ');
 
 const MATCH_KINDS = ['exact', 'prefix', 'contains'] as const;
 type MatchKind = (typeof MATCH_KINDS)[number];
@@ -211,16 +211,24 @@ export class ProductService {
   }
 }
 
-/** Pure: runs one Product quantity through the Layer 5B engine with the
- * label's own nutrients and servings only (no Food data, no density). */
-export function calculateProductNutrition(args: {
+export interface ProductCalculationArgs {
   product: ProductRow;
   label: LabelVersionRow | null;
   nutrients: readonly ProductNutrientRow[];
   servings: readonly ProductServingRow[];
   vocabulary: readonly NutrientDefinition[];
   input: ProductNutritionCalculateRequest;
-}) {
+}
+
+/** Pure: runs one Product quantity through the Layer 5B engine with the
+ * label's own nutrients and servings only (no Food data, no density). */
+export function calculateProductNutrition(args: ProductCalculationArgs) {
+  return computeProductNutrition(args).result;
+}
+
+/** As calculateProductNutrition, also returning the engine's exact item
+ * calculation (Layer 11B stores it in the MealItem snapshot). */
+export function computeProductNutrition(args: ProductCalculationArgs) {
   const { product, label, nutrients, servings, vocabulary, input } = args;
   const authoritative = label?.nutrition_source === 'manufacturer_label';
   // Only the authoritative label's values and servings reach the engine (G3).
@@ -232,10 +240,11 @@ export function calculateProductNutrition(args: {
     : [];
   const amount = input.product_serving_id ? { serving_id: input.product_serving_id } : { unit: input.unit ?? '' };
   const result = calculateNutrition([{ food: { food_id: product.id, canonical_name: displayName(product), density: null, servings: servingRefs, nutrients: records }, quantity: input.quantity, amount }], vocabulary);
-  const item = toItemDto(result.items[0] as NonNullable<(typeof result.items)[0]>);
+  const calculation = result.items[0] as NonNullable<(typeof result.items)[0]>;
+  const item = toItemDto(calculation);
   const nonAuthoritative = new Map(authoritative ? [] : nutrients.map((n) => [n.nutrient_id, n]));
 
-  return {
+  const dto = {
     calculation_version: NUTRITION_CALCULATION_VERSION,
     product_nutrition_version: PRODUCT_NUTRITION_VERSION,
     conversion_version: CONVERSION_VERSION,
@@ -276,9 +285,10 @@ export function calculateProductNutrition(args: {
     coverage_summary: toAggregateDto(result.aggregate, 1).coverage_summary,
     summary: projectAggregateSummary(result.aggregate, 1),
   };
+  return { result: dto, calculation, authoritative, nonAuthoritativeNutrientIds: new Set(nonAuthoritative.keys()) };
 }
 
-async function loadProduct(db: ScopedDbClient, productId: string): Promise<ProductRow> {
+export async function loadProduct(db: ScopedDbClient, productId: string): Promise<ProductRow> {
   const [product] = await db.select<ProductRow>('product', { columns: PRODUCT_COLUMNS, eq: { id: productId }, limit: 1 });
   if (!product) throw AppError.notFound('Product not found.');
   return product;
@@ -299,7 +309,7 @@ function summaryDto(p: ProductRow) {
   };
 }
 
-function labelSummaryDto(l: LabelVersionRow) {
+export function labelSummaryDto(l: LabelVersionRow) {
   return {
     id: l.id,
     version_number: l.version_number,

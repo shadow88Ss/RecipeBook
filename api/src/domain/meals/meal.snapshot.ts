@@ -64,7 +64,38 @@ export type SnapshotSource =
       title: string;
       yield_servings: number;
       servings_consumed: number;
-    };
+    }
+  | ProductSnapshotSource;
+
+/** Layer 11B — an exact Product at its exact ProductLabelVersion. Display
+ * names are recorded for historical explanation; identity is product_id +
+ * label_version.id. The package size is informational only (never a
+ * serving). The barcode is input provenance only. */
+export interface ProductSnapshotSource {
+  type: 'product';
+  product_id: string;
+  brand_name: string;
+  product_name: string;
+  variant_name: string | null;
+  market: string | null;
+  package: { quantity: number; unit: string | null } | null;
+  label_version: {
+    id: string;
+    version_number: number;
+    nutrition_source: string;
+    authority: string;
+    effective_from: string | null;
+    published_at: string;
+  };
+  /** How the label version was chosen (approved 11B G1/G2). */
+  label_version_selection: 'current_label' | 'user_confirmed_backdated' | 'correction_original_label';
+  quantity: number;
+  unit: string | null;
+  serving: { product_serving_id: string; description: string; canonical_quantity: number; canonical_unit: string; source: string } | null;
+  barcode: { barcode_id: string; canonical_gtin: string; submitted_digits: string; submitted_type: string; rules_version: string } | null;
+  product_nutrition_version: string;
+  generic_food_fallback: 'none';
+}
 
 export interface MealItemSnapshot {
   snapshot_version: string;
@@ -104,6 +135,40 @@ export function buildFoodSnapshot(
       };
     }),
     provenance: toItemDto(calculation),
+  };
+}
+
+export const PRODUCT_MEAL_ITEM_SNAPSHOT_VERSION = 'meal-item-snapshot-11b.1';
+
+/** Product item = the Layer 11A product calculation (Layer 5B engine over
+ * the exact label's own nutrients/servings; no Food data, no density). A
+ * nutrient the label does not state stays unavailable (never filled from a
+ * generic Food); a non-authoritative label value is recorded as
+ * not_authoritative with no value; a label 0 is a known zero. */
+export function buildProductSnapshot(
+  calculation: ItemCalculation,
+  nonAuthoritativeNutrientIds: ReadonlySet<string>,
+  source: ProductSnapshotSource,
+  provenance: unknown,
+): MealItemSnapshot {
+  return {
+    snapshot_version: PRODUCT_MEAL_ITEM_SNAPSHOT_VERSION,
+    calculation_version: NUTRITION_CALCULATION_VERSION,
+    conversion_version: CONVERSION_VERSION,
+    source,
+    nutrients: calculation.nutrients.map((n) => {
+      const resolved = n.status === 'resolved' && n.value !== null;
+      return {
+        nutrient_id: n.nutrient.id,
+        nutrient_key: n.nutrient.canonical_key,
+        nutrient_role: role(n.nutrient),
+        unit: n.unit,
+        coverage: resolved ? 'complete' : 'unavailable',
+        status: nonAuthoritativeNutrientIds.has(n.nutrient.id) ? 'not_authoritative' : n.status,
+        value_exact: resolved && n.value ? toFractionString(n.value) : null,
+      };
+    }),
+    provenance,
   };
 }
 

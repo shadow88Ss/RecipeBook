@@ -72,6 +72,10 @@ const actual = (id: string, partial: Partial<MealItemRow> & { snapshot?: MealIte
     food_serving_id: null,
     unit: 'g',
     recipe_version_id: null,
+    product_id: null,
+    product_label_version_id: null,
+    product_serving_id: null,
+    logged_via_barcode_id: null,
     quantity: 100,
     status: 'consumed',
     consumed_at: '2026-09-10T08:00:00Z', // 12:00 in Dubai

@@ -1,8 +1,10 @@
 // Layer 7A — Food & Meal Logging request contracts.
 //
 // A MealItem is exactly one of:
-//   { type: "food",   food_id, quantity, unit | serving_id }
-//   { type: "recipe", recipe_id, recipe_version_id, servings }
+//   { type: "food",    food_id, quantity, unit | serving_id }
+//   { type: "recipe",  recipe_id, recipe_version_id, servings }
+//   { type: "product", product_id | barcode (+ barcode_type), quantity,
+//     unit | product_serving_id, label_version_id? }       (Layer 11B)
 // Nutrition is never accepted from the client: the server calculates it and
 // stores it as the item's snapshot. status, match state, actor, snapshot and
 // correction links are server-owned (undeclared fields are stripped).
@@ -11,6 +13,7 @@ import { z } from 'zod';
 import { paginationQuerySchema } from '../../lib/pagination';
 import { quantitySchema } from '../conversion/conversion.schemas';
 import { unitCodeSchema } from '../nutrition/nutrition.schemas';
+import { BARCODE_TYPES } from '../products/barcode';
 import { profileIdParamSchema } from '../profiles/profile.schemas';
 import { isValidTimeZone } from './meal.time';
 
@@ -51,12 +54,42 @@ const recipeItemSchema = z.object({
   consumed_at: instantSchema.optional(),
 });
 
-export const mealItemInputSchema = z.discriminatedUnion('type', [foodItemSchema, recipeItemSchema]).superRefine((item, ctx) => {
+/** Layer 11B — an exact commercial Product, by id or by barcode. The server
+ * resolves the barcode, selects the exact ProductLabelVersion and computes
+ * nutrition; `quantity` is an amount in `unit`, or a count of the label's
+ * ProductServing. `label_version_id` is accepted only to answer a
+ * label-version confirmation (backdated logging, approved G1) — or, on a
+ * correction, to move off the original's label under the same rule. */
+const productItemSchema = z.object({
+  type: z.literal('product'),
+  product_id: z.uuid().optional(),
+  barcode: z.string().min(1).max(64).optional(),
+  barcode_type: z.enum(BARCODE_TYPES).optional(),
+  quantity: quantitySchema,
+  unit: unitCodeSchema.optional(),
+  product_serving_id: z.uuid().optional(),
+  label_version_id: z.uuid().optional(),
+  consumed_at: instantSchema.optional(),
+});
+
+export const mealItemInputSchema = z.discriminatedUnion('type', [foodItemSchema, recipeItemSchema, productItemSchema]).superRefine((item, ctx) => {
   if (item.type === 'food' && (item.unit === undefined) === (item.serving_id === undefined)) {
     ctx.addIssue({ code: 'custom', path: ['unit'], message: 'Provide exactly one of unit or serving_id.' });
   }
+  if (item.type === 'product') {
+    if ((item.product_id === undefined) === (item.barcode === undefined)) {
+      ctx.addIssue({ code: 'custom', path: ['product_id'], message: 'Provide exactly one of product_id or barcode.' });
+    }
+    if (item.barcode_type !== undefined && item.barcode === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['barcode_type'], message: 'barcode_type is only accepted with barcode.' });
+    }
+    if ((item.unit === undefined) === (item.product_serving_id === undefined)) {
+      ctx.addIssue({ code: 'custom', path: ['unit'], message: 'Provide exactly one of unit or product_serving_id.' });
+    }
+  }
 });
 export type MealItemInput = z.infer<typeof mealItemInputSchema>;
+export type ProductItemInput = Extract<MealItemInput, { type: 'product' }>;
 
 const notesSchema = z
   .string()
