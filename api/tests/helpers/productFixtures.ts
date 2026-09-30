@@ -57,8 +57,8 @@ export async function addBarcode(pool: Pool, product: string, code: string, type
   const normalized = normalizeBarcode(code, type);
   if (!normalized.ok) throw new Error(`fixture barcode ${code} is invalid: ${normalized.reason}`);
   const { rows } = await pool.query<{ id: string }>(
-    "insert into barcode (product_id, gtin, barcode_type, source, provenance_reference) values ($1, $2, $3, 'manufacturer_data', 'fixture') returning id",
-    [product, normalized.gtin, normalized.barcode_type],
+    "insert into barcode (product_id, gtin, barcode_type, submitted_code, source, provenance_reference) values ($1, $2, $3, $4, 'manufacturer_data', 'fixture') returning id",
+    [product, normalized.gtin, normalized.barcode_type, normalized.digits],
   );
   return (rows[0] as { id: string }).id;
 }

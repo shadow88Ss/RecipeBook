@@ -97,13 +97,14 @@ interface BarcodeRow {
   product_id: string;
   gtin: string;
   barcode_type: BarcodeType;
+  submitted_code: string | null;
   status: 'active' | 'retired';
   retired_at: string | null;
   source: string;
   provenance_reference: string | null;
   created_at: string;
 }
-const BARCODE_COLUMNS = 'id, product_id, gtin, barcode_type, status, retired_at, source, provenance_reference, created_at';
+const BARCODE_COLUMNS = 'id, product_id, gtin, barcode_type, submitted_code, status, retired_at, source, provenance_reference, created_at';
 
 /** Identity-scoped authority of Product label data (G3). */
 export function productAuthorityOf(source: NutritionSource): 'exact_product' | 'non_authoritative_product_source' {
@@ -183,6 +184,7 @@ export class ProductService {
         canonical_gtin: normalized.gtin,
         barcode_id: barcode.id,
         stored_barcode_type: barcode.barcode_type,
+        stored_submitted_code: barcode.submitted_code,
         match: 'exact_canonical_gtin' as const,
       },
       product: await detailDto(db, product),
@@ -336,7 +338,7 @@ async function detailDto(db: ScopedDbClient, product: ProductRow) {
     updated_at: product.updated_at,
     barcodes: barcodes
       .sort((a, b) => cmp(a.status, b.status) || cmp(a.gtin, b.gtin) || cmp(a.id, b.id))
-      .map((b) => ({ id: b.id, gtin: b.gtin, barcode_type: b.barcode_type, status: b.status, retired_at: b.retired_at, source: b.source, provenance_reference: b.provenance_reference })),
+      .map((b) => ({ id: b.id, gtin: b.gtin, barcode_type: b.barcode_type, submitted_code: b.submitted_code, status: b.status, retired_at: b.retired_at, source: b.source, provenance_reference: b.provenance_reference })),
     current_label: current
       ? {
           ...labelSummaryDto(current),

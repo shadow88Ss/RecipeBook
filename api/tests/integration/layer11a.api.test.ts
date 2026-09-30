@@ -315,6 +315,120 @@ describe('exact Product nutrition (H-R, J, AB, AC)', () => {
   });
 });
 
+describe('approval audit: label history (1-7)', () => {
+  it('publishing v2 moves the current pointer and leaves v1 and its nutrients/servings untouched', async () => {
+    const snapshot = async (label: string) => ({
+      version: (await pool.query('select id, product_id, version_number, nutrition_source, provenance_reference, effective_from, created_at from product_label_version where id = $1', [label])).rows,
+      nutrients: (await pool.query('select * from product_nutrient where label_version_id = $1 order by id', [label])).rows,
+      servings: (await pool.query('select * from product_serving where label_version_id = $1 order by id', [label])).rows,
+    });
+    // 1/2: version 1 exists with nutrients and servings
+    const v1 = await snapshot(LABEL.yogurtAE as string);
+    expect(v1.version).toEqual([expect.objectContaining({ version_number: 1 })]);
+    expect(v1.nutrients).toHaveLength(5);
+    expect(v1.servings).toHaveLength(1);
+    // 3: publish version 2 (a reformulation)
+    const v2 = await publishLabel(pool, P.yogurtAE, 'manufacturer_label', [{ nutrient_id: NUT.protein, amount: 10, basis_quantity: 100, basis_unit: 'g' }], [
+      { serving_description: '1 portion', canonical_quantity: 125, canonical_unit: 'g' },
+    ], 'fixture-label-v2');
+    // 4: the Product points to version 2
+    expect((await pool.query('select current_label_version_id from product where id = $1', [P.yogurtAE])).rows[0].current_label_version_id).toBe(v2);
+    // 5/6/7: version 1 (row, nutrients, servings) is unchanged apart from its supersession marker
+    const after = await snapshot(LABEL.yogurtAE as string);
+    expect(after).toEqual(v1);
+    const v1Status = (await pool.query('select status, superseded_by_label_version_id from product_label_version where id = $1', [LABEL.yogurtAE])).rows[0];
+    expect(v1Status).toEqual({ status: 'superseded', superseded_by_label_version_id: v2 });
+    const v1Read = await calc(P.yogurtAE, { quantity: 100, unit: 'g', label_version_id: LABEL.yogurtAE });
+    expect(nutrient(v1Read.body, 'protein').value).toBe(9);
+    expect(nutrient(v1Read.body, 'fat')).toMatchObject({ value: 0, is_zero: true });
+    const current = await calc(P.yogurtAE, { quantity: 100, unit: 'g' });
+    expect(current.body.label_version).toMatchObject({ id: v2, version_number: 2 });
+    expect(nutrient(current.body, 'protein').value).toBe(10);
+    expect(nutrient(current.body, 'fat').status).toBe('no_data'); // v2 does not list fat: missing, never inherited from v1
+    await expect(pool.query("update product_label_version set provenance_reference = 'rewritten' where id = $1", [LABEL.yogurtAE])).rejects.toMatchObject({
+      constraint: 'product_label_version_immutable',
+    });
+    await expect(pool.query('delete from product_nutrient where label_version_id = $1', [LABEL.yogurtAE])).rejects.toThrow(/append-only/);
+  });
+});
+
+describe('approval audit: FoodNutrient boundary (1-5)', () => {
+  const insertFoodNutrient = (source: string) =>
+    pool.query("insert into food_nutrient (food_id, nutrient_id, amount_per_canonical_unit, source) select $1, id, 1, $2::food_data_source from nutrient where canonical_key = 'zinc'", [F.thirds, source]);
+
+  it('1: a trusted_database FoodNutrient is still accepted through the trusted workflow', async () => {
+    await expect(insertFoodNutrient('trusted_database')).resolves.toMatchObject({ rowCount: 1 });
+  });
+
+  it('2: a new manufacturer_label FoodNutrient is rejected', async () => {
+    await expect(insertFoodNutrient('manufacturer_label')).rejects.toThrow(/food_nutrient_generic_reference_source/);
+  });
+
+  it('3: legacy manufacturer_label FoodNutrient rows are preserved, readable and keep the 5B ambiguity', async () => {
+    expect((await pool.query("select count(*)::int as n from food_nutrient where source = 'manufacturer_label'")).rows[0].n).toBe(4);
+    const res = await A().post('/v1/nutrition/calculate', { items: [{ food_id: F.competing, quantity: 100, unit: 'g' }, { food_id: F.bar, quantity: 40, unit: 'g' }] });
+    const protein = (i: number) => res.body.items[i].nutrients.find((n: { nutrient_key: string }) => n.nutrient_key === 'protein');
+    expect(protein(0)).toMatchObject({ status: 'ambiguous_nutrient_source', value: null });
+    expect(protein(1)).toMatchObject({ status: 'resolved', value: 10, source: { source: 'manufacturer_label' } });
+    const constraint = await pool.query("select convalidated from pg_constraint where conname = 'food_nutrient_generic_reference_source'");
+    expect(constraint.rows).toEqual([{ convalidated: false }]);
+  });
+
+  it('4: Product manufacturer_label nutrition is accepted in ProductNutrient', async () => {
+    const label = await publishLabel(pool, P.crackers, 'manufacturer_label', [{ nutrient_id: NUT.energy, amount: 480, basis_quantity: 100, basis_unit: 'g' }], []);
+    expect((await pool.query('select source from product_nutrient where label_version_id = $1', [label])).rows).toEqual([{ source: 'manufacturer_label' }]);
+  });
+
+  it('5: Product calculation does not mutate FoodNutrient', async () => {
+    const before = (await pool.query("select md5(string_agg(to_jsonb(n)::text, ',' order by id)) as h from food_nutrient n")).rows[0].h;
+    await calc(P.crackers, { quantity: 50, unit: 'g' });
+    await calc(P.drink, { quantity: 1, product_serving_id: SERVING.drink });
+    expect((await pool.query("select md5(string_agg(to_jsonb(n)::text, ',' order by id)) as h from food_nutrient n")).rows[0].h).toBe(before);
+  });
+});
+
+describe('approval audit: barcodes', () => {
+  it('each supported format is accepted at the API and stored with its submitted representation', async () => {
+    const detail = (await A().get(`/v1/products/${P.bar}`)).body;
+    expect(detail.barcodes.map((b: { gtin: string; barcode_type: string; submitted_code: string }) => [b.barcode_type, b.submitted_code, b.gtin])).toEqual([
+      ['ean_8', '96385074', '00000096385074'],
+      ['gtin_14', '10036000291459', '10036000291459'],
+    ]);
+    const drink = (await A().get(`/v1/products/barcode/${BARCODE.drinkUpcE}`, { type: 'upc_e' })).body;
+    expect(drink.match).toMatchObject({ submitted_type: 'upc_e', canonical_gtin: '00012345000065', stored_barcode_type: 'upc_e', stored_submitted_code: '01234565' });
+    expect((await A().get(`/v1/products/barcode/${BARCODE.yogurtUS}`)).body.match).toMatchObject({ submitted_type: 'upc_a', stored_submitted_code: '036000291452' });
+    expect((await A().get(`/v1/products/barcode/${BARCODE.yogurtAE}`)).body.match).toMatchObject({ submitted_type: 'ean_13', stored_submitted_code: '4006381333931' });
+  });
+
+  it('invalid length is rejected at the API', async () => {
+    for (const code of ['40063813339', '400638133393100', '1234567']) {
+      const res = await A().get(`/v1/products/barcode/${code}`);
+      expect(res.status).toBe(400);
+      expect(res.body.error.details.reason).toBe('invalid_length');
+    }
+  });
+
+  it('the stored submitted representation must match its declared type and is immutable', async () => {
+    await expect(pool.query("insert into barcode (product_id, gtin, barcode_type, submitted_code, source) values ($1, '05901234123457', 'ean_13', '590123412345', 'manufacturer_data')", [P.crackers])).rejects.toThrow(
+      /barcode_submitted_code_length/,
+    );
+    const id = (await pool.query("select id from barcode where gtin = '04006381333931' and status = 'active'")).rows[0].id;
+    await expect(pool.query("update barcode set submitted_code = '0036000291452' where id = $1", [id])).rejects.toThrow(/barcode identity is immutable/);
+  });
+
+  it('an ordinary client cannot reassign a barcode to another Product, retire it, or create one', async () => {
+    const attempts = [
+      `update barcode set product_id = '${P.crackers}' where gtin = '04006381333931'`,
+      `update barcode set status = 'retired', retired_at = now(), retired_reason = 'x' where gtin = '04006381333931'`,
+      `insert into barcode (product_id, gtin, barcode_type, submitted_code, source) values ('${P.crackers}', '05000000000009', 'gtin_14', '05000000000009', 'manufacturer_data')`,
+      `delete from barcode where gtin = '04006381333931'`,
+    ];
+    for (const sql of attempts) await expect(asAuthenticated(SEED.accountA, (q) => q(sql))).rejects.toThrow(/permission denied/);
+    const row = (await pool.query("select product_id, status from barcode where gtin = '04006381333931'")).rows;
+    expect(row).toEqual([{ product_id: P.yogurtAE, status: 'active' }]);
+  });
+});
+
 describe('security (Y, Z, AA, 24)', () => {
   it('AA: every Product API requires authentication', async () => {
     for (const res of [
