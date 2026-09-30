@@ -145,3 +145,7 @@ No mobile application exists in this repository yet (confirmed by direct inspect
 6. Logout calls the SDK's sign-out, then marks the local `DeviceSession` row revoked via an authenticated API call before clearing local session state. Logout-all calls the SDK's global sign-out equivalent and expects the API to have marked every `DeviceSession` row for that Account revoked (§11 of `33_Security_and_Privacy.md`'s RLS input table already permits an Account to update all of its own `DeviceSession` rows in one statement).
 
 This contract is a requirement for whichever future phase builds the mobile project — nothing here is implemented as mobile code.
+
+## 14. Platform administration and identity providers (Phase 3 Layer 11C)
+
+Platform administrators authenticate exactly like every other user — through Supabase Auth; there is no second authentication system, admin password or admin token. Authorization then follows Account → PlatformRoleAssignment (`platform_admin`) → administration APIs (`30_API.md` §29). Supabase Auth remains the only identity/token authority: Google Sign-In and Sign in with Apple are recorded in the integration registry (`identity` family, `connection_model: supabase_auth`) only as administrative definitions — they cannot be enabled, tested or routed there, and their availability and credentials are configured in Supabase Auth (§12).

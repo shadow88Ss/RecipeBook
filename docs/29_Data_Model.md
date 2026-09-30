@@ -404,3 +404,7 @@ This table is not fully populated in this document; producing it is the immediat
 ## 15. Full Field-Level Data Dictionary
 
 The exhaustive field-level Data Dictionary (type, nullability, default, key relationships, source, validation, editability, PII/health/child classification, retention, deletion, export, provenance, audit, indexes) for every Phase 1 entity is maintained in a companion document: **`29_Data_Model_Data_Dictionary.md`**. That document is normative for field-level detail; this document remains normative for entity shape, relationships, and lifecycle/state-machine rules.
+
+### 4.9 Platform administration & integrations (Phase 3 Layer 11C)
+
+New entities **PlatformRoleAssignment** (Account → `platform_role`, starting with `platform_admin`; revocable; one active row per account and role), **ExternalProvider** (one platform integration per stable `provider_key`), **ExternalProviderCapability** (explicit, family-scoped capabilities with enabled/priority) and **ProviderCapabilityDefinition** (the family-scoped capability vocabulary). A composite FK `(provider_family, capability)` makes a capability of another family impossible. ExternalProvider may name the existing `wearable_provider` value it corresponds to: **WearableConnection remains the user connection** (unchanged). No core domain entity changes. Field-level definitions: Data Dictionary §41; migration `20261012120000_platform_admin_integrations.sql`.

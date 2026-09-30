@@ -48,6 +48,10 @@ import { createShoppingRouter } from './domain/groceries/shopping.routes';
 import { ShoppingService } from './domain/groceries/shopping.service';
 import { createProgressRouter } from './domain/progress/progress.routes';
 import { ProgressService } from './domain/progress/progress.service';
+import { createIntegrationAdminRouter } from './domain/integrations/integration.routes';
+import { IntegrationService } from './domain/integrations/integration.service';
+import { createDefaultAdapterRegistry, type AdapterRegistry } from './domain/integrations/adapters';
+import { EnvSecretResolver, type SecretResolver } from './domain/integrations/secrets';
 import type { ScopedDbFactory } from './lib/scopedDb';
 import type { Logger } from './lib/logger';
 import { AppError } from './lib/errors';
@@ -57,9 +61,13 @@ export interface AppDependencies {
   scopedDbFactory: ScopedDbFactory;
   jwtSecret: string;
   logger: Logger;
+  /** Layer 11C — provider adapters, secret resolution and the deployment
+   * environment label. Defaults: the production registry (no external
+   * adapters yet), `env:` secret references, NODE_ENV. */
+  integrations?: { registry?: AdapterRegistry; secrets?: SecretResolver; deploymentEnvironment?: string };
 }
 
-export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logger }: AppDependencies): Express {
+export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logger, integrations }: AppDependencies): Express {
   const app = express();
   app.disable('x-powered-by');
 
@@ -81,6 +89,11 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   const foodService = new FoodService(scopedDbFactory);
   const nutritionService = new NutritionService(scopedDbFactory);
   const productService = new ProductService(scopedDbFactory);
+  const integrationService = new IntegrationService(scopedDbFactory, {
+    registry: integrations?.registry ?? createDefaultAdapterRegistry(),
+    secrets: integrations?.secrets ?? new EnvSecretResolver(),
+    deploymentEnvironment: integrations?.deploymentEnvironment ?? process.env.NODE_ENV ?? 'development',
+  });
   const recipeService = new RecipeService(scopedDbFactory);
   const recipeVariantService = new RecipeVariantService(scopedDbFactory);
   const mealService = new MealService(scopedDbFactory);
@@ -127,6 +140,8 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   // Layer 11A — global Product & Barcode reference data (read-only) and
   // exact-Product nutrition through the Layer 5B engine.
   v1.use('/products', requireAuth, createProductRouter(productService));
+  // Layer 11C — platform administration (platform_admin only).
+  v1.use('/admin/integrations', requireAuth, createIntegrationAdminRouter(integrationService));
   app.use('/v1', v1);
 
   app.use((req, _res, next) => {

@@ -720,6 +720,16 @@ Wearable-derived energy expenditure is an input to coaching, not unquestionable 
 
 The UI/coach must be capable of explaining uncertainty where appropriate.
 
+## 17.1 Platform administration & integrations (Phase 3 Layer 11C)
+
+- **Separate security domain.** Platform administration is authorized by a **PlatformRoleAssignment** (`platform_admin`), never by Profile access. Supabase Auth → Account → PlatformRoleAssignment → administration. Owning or managing a Profile (full_management, view_only, pediatric_weight_management) grants no platform authority; `platform_admin` grants no access to any Profile's health or nutrition data. There is no second authentication system and no `Account.is_admin` flag. Role assignments are made by trusted operators only.
+- **Provider registry.** Each external integration is an **ExternalProvider** with a stable `provider_key`, a **family** (`product_data`, `wearable`, `device_health`, `commerce`, `identity`), a connection model (platform server-to-server, user-authorized, device-native, Supabase Auth), a platform credential model (`none`, `api_key`, `oauth_client`, `service_account`, `device_native`), enabled flag, environment, validated non-secret configuration, a secret **reference**, and health. Capabilities are explicit and family-scoped; the application asks "which enabled provider supports `barcode_lookup`?", never "is FatSecret enabled?".
+- **Adding a provider** = implement its family's adapter contract, register the adapter (code), register/configure the provider and its secret reference, enable it (administration). Food, Product, Nutrition, Recipe, Meal, MealPlan, Grocery, Progress and Authentication do not change. External data is candidate data only; bringing it into reference or user data is a later, reviewed ingestion step owned by those domains.
+- **Platform configuration ≠ user connection.** ExternalProvider is how the platform supports a provider; a user's own authorization lives in that domain's connection model (WearableConnection for wearables). Server-to-server providers need no user connection; device-native providers (Apple Health, Health Connect) use the OS framework and consent on the device, with no server credential.
+- **Secrets** are never stored in configuration or returned by any API: only a reference (`env:NAME`) is stored; values are resolved server-side at call time. The mobile app never receives platform secrets. User OAuth tokens are user-connection secrets (future, with WearableConnection).
+- **Identity** providers stay under Supabase Auth; the registry may record them but cannot enable or replace them.
+- **Routing, health, failures.** Internal sources (e.g. the Product catalog) come first, then enabled providers by configured priority. Failures map to `authentication_failed`, `rate_limited`, `timeout`, `provider_unavailable`, `invalid_provider_response`, `capability_not_supported`; authentication and invalid-request failures are never retried as temporary. All admin changes are audited through AuditEvent. Admin operational views show aggregates only (e.g. number of active/failing user connections), never user meals, weights, sleep or nutrition.
+
 ---
 
 # 18. Error and Confidence Model
