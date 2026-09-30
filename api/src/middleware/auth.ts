@@ -1,6 +1,8 @@
-// Layer 4A §3 — Supabase JWT authentication middleware.
+// Layer 4A §3 / Layer 12A.1 — Supabase JWT authentication middleware.
 //
-// Verifies the bearer token locally (HS256, the project's JWT secret) and
+// Verifies the bearer token locally with the configured AccessTokenVerifier
+// (JWKS for Supabase's asymmetric signing keys, and/or the explicitly
+// enabled legacy HS256 secret — see src/lib/accessTokenVerifier.ts) and
 // derives the caller's Account strictly from the verified `sub` claim.
 // account_id is never accepted from a client-supplied header, query
 // parameter, path parameter, or body field as authentication evidence
@@ -15,22 +17,20 @@
 // query issued with the caller's forwarded token.
 
 import type { NextFunction, Request, Response } from 'express';
-import jwt from 'jsonwebtoken';
+import { createAccessTokenVerifier, type AccessTokenVerifier } from '../lib/accessTokenVerifier';
 import { AppError } from '../lib/errors';
 
 const BEARER_PREFIX = 'Bearer ';
 
-/** Supabase Auth issues access tokens with this fixed audience claim for
- * ordinary authenticated API access. Rejecting anything else (e.g. a token
- * minted for a different purpose) is intentional, narrow scope-checking. */
-const EXPECTED_AUDIENCE = 'authenticated';
+export type AuthMiddlewareOptions =
+  | { verifier: AccessTokenVerifier }
+  /** Legacy HS256 only, with no issuer check — the local test harness. */
+  | { jwtSecret: string };
 
-export interface AuthMiddlewareOptions {
-  jwtSecret: string;
-}
+export function createAuthMiddleware(options: AuthMiddlewareOptions) {
+  const verifier = 'verifier' in options ? options.verifier : createAccessTokenVerifier({ mode: 'legacy_hs256', legacySecret: options.jwtSecret });
 
-export function createAuthMiddleware({ jwtSecret }: AuthMiddlewareOptions) {
-  return function requireAuth(req: Request, _res: Response, next: NextFunction): void {
+  return async function requireAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {
     const header = req.header('authorization');
     if (!header || !header.startsWith(BEARER_PREFIX)) {
       next(AppError.unauthenticated());
@@ -43,28 +43,24 @@ export function createAuthMiddleware({ jwtSecret }: AuthMiddlewareOptions) {
       return;
     }
 
-    let payload: jwt.JwtPayload;
-    try {
-      const verified = jwt.verify(token, jwtSecret, {
-        algorithms: ['HS256'],
-        audience: EXPECTED_AUDIENCE,
-      });
-      if (typeof verified === 'string' || !verified.sub) {
-        next(AppError.unauthenticated());
-        return;
-      }
-      payload = verified;
-    } catch {
-      // Deliberately one generic outcome for every verification failure
-      // (bad signature, expired, wrong audience, malformed) — the specific
-      // reason is never disclosed to the client, only ever to server logs
-      // (and even there, never the token itself).
-      next(AppError.unauthenticated());
+    // Deliberately one generic outcome for every rejected token (bad
+    // signature, expired, wrong issuer/audience/role, malformed, unknown
+    // key) — the specific reason is never disclosed to the client, and the
+    // token itself is never logged.
+    const result = await verifier.verify(token);
+    if (!result.ok) {
+      next(
+        result.reason === 'unavailable'
+          ? // The signing keys could not be fetched: a temporary server
+            // problem, not a bad token, so clients must not sign out.
+            AppError.unavailable('Authentication is temporarily unavailable.')
+          : AppError.unauthenticated(),
+      );
       return;
     }
 
     req.auth = {
-      accountId: payload.sub as string,
+      accountId: result.accountId,
       accessToken: token,
     };
     next();

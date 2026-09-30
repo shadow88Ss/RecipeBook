@@ -169,6 +169,31 @@ describe('Today / Daily Tracker (§24–25)', () => {
     expect(store.data.size).toBe(0);
   });
 
+  it.each([
+    [503, 'This service is temporarily unavailable.'],
+    [500, 'Something went wrong on our side.'],
+  ])('keeps the session on an API %i (outage is not an auth failure)', async (status, message) => {
+    const { store } = await renderApp(today, {
+      routes: { 'GET /v1/profiles': oneProfile, 'GET /v1/profiles/[^/]+/daily-tracker': () => json(status, { error: { code: 'X', message: 'Authentication is temporarily unavailable.', requestId: 'r' } }) },
+    });
+    expect(await screen.findByText(message)).toBeTruthy();
+    expect(screen.queryByTestId('sign-in-screen')).toBeNull();
+    expect(store.data.size).toBeGreaterThan(0);
+  });
+
+  it('keeps the session when the API is unreachable', async () => {
+    const { store } = await renderApp(today, {
+      routes: {
+        'GET /v1/profiles': () => {
+          throw new TypeError('Network request failed');
+        },
+      },
+    });
+    expect(await screen.findByText('You appear to be offline. Check your connection.')).toBeTruthy();
+    expect(screen.getByTestId('select-profile-screen')).toBeTruthy();
+    expect(store.data.size).toBeGreaterThan(0);
+  });
+
   it('invalidateAfterNutritionWrite re-reads the Daily Tracker for that Profile', async () => {
     let served = 0;
     const { queryClient } = await renderApp(today, {

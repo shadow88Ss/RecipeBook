@@ -2,7 +2,7 @@
 
 The iOS and Android app for MyRecipeBook: React Native, Expo SDK 57, TypeScript and Expo Router. This is the Phase 4 Layer 12A foundation: sign-in, Profile selection, Today (Daily Tracker) and Progress connected to the `/v1` API, with the other areas as shells.
 
-> Status: the app has only been tested with mocked Supabase and API responses. It has **not** been run against a live Supabase project or a deployed API, and not on a physical device. See [External configuration still required](#external-configuration-still-required).
+> Status: the app has only been tested with mocked Supabase and API responses. The live setup and phone checklist are in `docs/40_Development_Environment.md`. It has **not** been run against a live Supabase project or a deployed API, and not on a physical device. See [External configuration still required](#external-configuration-still-required).
 
 ## Contents
 
@@ -48,7 +48,7 @@ It is a standalone npm project next to `api/`. There is no workspace or shared p
 
 ## Environment
 
-All configuration is public, set through `EXPO_PUBLIC_*` variables that Expo compiles into the bundle. Copy `.env.example` to `.env.local` (git-ignored) and fill it in.
+All configuration is public, set through `EXPO_PUBLIC_*` variables that Expo compiles into the bundle. Copy `.env.example` to `.env.local` (git-ignored) and fill it in. After changing any value, restart with `npx expo start -c`: Metro caches compiled files with the old values inlined.
 
 | Variable | Required | Notes |
 |---|---|---|
@@ -80,6 +80,7 @@ Supabase Auth is the only auth authority. The app uses the official `@supabase/s
 - **Refresh:** supabase-js refreshes tokens itself. The app starts auto-refresh while in the foreground and stops it in the background, and reads the session from Supabase for every API request (`getSession` refreshes when needed). There is no second refresh implementation.
 - **Sign out:** the SDK sign-out (revokes the refresh token when the network is available), then the secure session keys are wiped and the in-memory API cache is cleared, even if the network call fails.
 - **API 401:** treated as an ended session. The local session is cleared, cached data is dropped, and the sign-in screen shows "Your session has ended".
+- **Outages are not auth failures:** offline, timeouts, 5xx and 503 (including the API failing to fetch Supabase signing keys) show an error with Try again and keep the user signed in.
 
 Not built yet: `DeviceSession` registration (no API endpoint exists), biometric unlock.
 
@@ -194,7 +195,8 @@ Troubleshooting:
 
 - "App configuration problem": a variable is missing or invalid. Fix `.env.local` and restart Expo with `npx expo start -c`.
 - "You appear to be offline": the phone cannot reach the API URL. Check the LAN IP, the port and the firewall.
-- Every request ends with "Your session has ended": the API is rejecting the Supabase token. Check that the API's `SUPABASE_JWT_SECRET` belongs to the same project (see the signing-key risk below).
+- Every request ends with "Your session has ended": the API is rejecting the Supabase token. Check that the API's `SUPABASE_URL` is the same project as the app's and that `SUPABASE_JWT_VERIFICATION` matches the project's signing keys (`jwks` for current projects).
+- "Authentication is temporarily unavailable" / "temporarily unavailable": the API could not fetch the project's signing keys. You stay signed in; retry later.
 
 ## Expo Go or a development build
 
@@ -203,13 +205,13 @@ Troubleshooting:
 - Secure storage works in Expo Go: values go to the Keychain / Keystore under Expo Go's own app identity. The placeholder bundle id, the Android backup exclusion and the app's own URL scheme only take effect in a development or store build.
 - In Expo Go, the OAuth redirect is an `exp://` URL, which would have to be allowed in Supabase. Google/Apple are disabled for now anyway.
 
-**Development build:** the config is ready (`app.config.ts`, placeholder ids, config plugins) for `npx expo run:ios` / `npx expo run:android` or `npx eas-cli build --profile development`. No `eas.json`, signing credentials or store accounts exist yet, and nothing has been built or published.
+**Development build:** prepared, not built. `eas.json` has `development`, `development-simulator` and `preview` profiles (no production or submit profile). The first development build also needs `npx expo install expo-dev-client`, an Expo account, EAS environment variables for the `EXPO_PUBLIC_*` values, and Apple/Google developer accounts; see `docs/40_Development_Environment.md` §8. Nothing has been built or published.
 
 ## External configuration still required
 
 - **A Supabase project per environment** (at least development): URL and anon/publishable key for the app, and the JWT secret, URL and anon key for the API. None exists yet (`docs/37_Authentication_and_Login.md` §12).
 - **A reachable API** for the phone: a LAN address in development, or a hosted HTTPS deployment. None is deployed.
-- **Signing-key risk:** the API verifies HS256 tokens with the legacy `SUPABASE_JWT_SECRET`. New Supabase projects default to asymmetric JWT signing keys, and the API would then reject every token. Check the project's JWT settings before connecting, or plan an additive API change to verify through the project's JWKS.
+- **Signing keys:** resolved in Layer 12A.1. The API verifies Supabase's asymmetric JWT signing keys through the project's JWKS (`SUPABASE_JWT_VERIFICATION=jwks`), with legacy HS256 only when explicitly configured (`docs/37_Authentication_and_Login.md` §16).
 - **Google and Apple sign-in:** provider apps and credentials, Supabase provider settings and redirect URLs (the app's scheme and, for Expo Go, the `exp://` URL), then `EXPO_PUBLIC_AUTH_OAUTH_PROVIDERS`. Apple also expects native Sign in with Apple on iOS when other social logins are offered.
 - **Store identities:** real bundle ids, Apple Developer and Play Console accounts, `eas.json` and signing.
 - **`DeviceSession` registration:** needs an API endpoint first.

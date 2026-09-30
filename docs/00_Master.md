@@ -750,6 +750,12 @@ The UI/coach must be capable of explaining uncertainty where appropriate.
 - **No third-party analytics or crash-reporting SDKs; no admin UI.** The API client refuses `/v1/admin/*`.
 - Details: `mobile/README.md`.
 
+## 17.4 Live environment & modern Supabase JWT verification (Phase 4 Layer 12A.1)
+
+- The API verifies Supabase access tokens against the project's **JWKS** (asymmetric JWT signing keys, ES256/RS256), with the legacy HS256 secret only when explicitly configured; the mode is `SUPABASE_JWT_VERIFICATION` (`37_Authentication_and_Login.md` §16). No custom tokens, no parallel auth.
+- A JWKS outage answers `503`, never `401`, so clients keep their session; only a rejected token triggers re-authentication.
+- Development environment runbook, live smoke suite and live-vs-mock matrix: `40_Development_Environment.md`.
+
 ---
 
 # 18. Error and Confidence Model

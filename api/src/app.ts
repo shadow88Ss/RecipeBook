@@ -58,11 +58,15 @@ import { ExternalProductService } from './domain/externalProducts/externalProduc
 import type { ScopedDbFactory } from './lib/scopedDb';
 import type { Logger } from './lib/logger';
 import { AppError } from './lib/errors';
+import type { AccessTokenVerifier } from './lib/accessTokenVerifier';
 
 export interface AppDependencies {
   profileRepository: ProfileRepository;
   scopedDbFactory: ScopedDbFactory;
-  jwtSecret: string;
+  /** Layer 12A.1 — the configured Supabase access-token verifier. */
+  tokenVerifier?: AccessTokenVerifier;
+  /** Legacy HS256 secret with no issuer check; used by the local test harness only. */
+  jwtSecret?: string;
   logger: Logger;
   /** Layer 11C/11D — provider adapters, secret resolution and the
    * deployment environment label. Defaults: the production registry
@@ -71,7 +75,7 @@ export interface AppDependencies {
   integrations?: { registry?: AdapterRegistry; secrets?: SecretResolver; deploymentEnvironment?: string; now?: () => Date };
 }
 
-export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logger, integrations }: AppDependencies): Express {
+export function createApp({ profileRepository, scopedDbFactory, tokenVerifier, jwtSecret, logger, integrations }: AppDependencies): Express {
   const app = express();
   app.disable('x-powered-by');
 
@@ -83,7 +87,8 @@ export function createApp({ profileRepository, scopedDbFactory, jwtSecret, logge
   // versioned data contract).
   app.use('/health', createHealthRouter());
 
-  const requireAuth = createAuthMiddleware({ jwtSecret });
+  if (!tokenVerifier && !jwtSecret) throw new Error('createApp needs a tokenVerifier (or a jwtSecret for the test harness)');
+  const requireAuth = createAuthMiddleware(tokenVerifier ? { verifier: tokenVerifier } : { jwtSecret: jwtSecret as string });
   const profileService = new ProfileService(profileRepository, scopedDbFactory);
   const goalService = new GoalService(scopedDbFactory);
   const nutritionTargetService = new NutritionTargetService(scopedDbFactory);

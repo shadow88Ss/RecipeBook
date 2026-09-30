@@ -162,3 +162,26 @@ Platform administrators authenticate exactly like every other user — through S
 ## 15. Provider platform credentials (Phase 3 Layer 11D)
 
 FatSecret's OAuth 2.0 **client-credentials** grant is a server-to-server platform credential, not user authentication: it never involves a user, a Supabase session or the mobile app. The client id/secret are deployment secrets resolved by the API; the resulting access token is held in API memory only. Open Food Facts reads need no credential (an identifying User-Agent only). Users calling the external-product endpoints authenticate with their normal Supabase session; no provider identity is created or linked for them.
+
+
+## 16. Access-token verification in the API (Phase 4 Layer 12A.1)
+
+Supabase Auth remains the only token issuer; the API never mints, refreshes or accepts any other token. Current Supabase projects sign access tokens with asymmetric **JWT signing keys** (ES256 by default, or RS256) and publish the public keys at `https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json`; the shared HS256 secret is Supabase's legacy model, not recommended for production. (Source: Supabase docs "JWT Signing Keys", "JSON Web Token (JWT)", "JWT Claims Reference", read 2026-09-30.)
+
+**Mode is configuration, never the token.** `SUPABASE_JWT_VERIFICATION` (required, no default):
+
+| Mode | Accepts | Needs | Use |
+|---|---|---|---|
+| `jwks` | ES256/RS256 against the JWKS | issuer (derived from `SUPABASE_URL`) | every current Supabase project; the approved production mode |
+| `legacy_hs256` | HS256 with `SUPABASE_JWT_SECRET` | the legacy secret | a project still on the legacy secret, the local Supabase stack, the local test harness |
+| `jwks_with_legacy_hs256` | both, each path pinned to its own algorithms | both | only while a project migrates to signing keys (old HS256 tokens still live) |
+
+The token's `alg` header only chooses between the paths the mode enables, and each path pins its algorithms, so an asymmetric token is never checked as HS256 (or the reverse) and `alg: none` is always rejected. In `jwks` mode the legacy secret is not used even if present. The API logs a warning at startup whenever a legacy mode is enabled.
+
+**Claims.** Signature; `exp` (5 s clock tolerance); `iss` = `SUPABASE_JWT_ISSUER` (default `<SUPABASE_URL>/auth/v1`; the local test harness alone runs without an issuer); `aud` = `authenticated`; `role` = `authenticated` (so `anon` and `service_role` tokens are refused); `sub` a UUID; `is_anonymous` not true (anonymous sign-in is not an approved method, §3). The Account id is the verified `sub` (= `auth.users.id` = `account.id`, §11) and nothing else.
+
+**JWKS cache and rotation** (`jose` remote key set): keys are fetched on first use and cached for at most 10 minutes (Supabase's edge caches the endpoint for 10 minutes too), never per request; a token whose `kid` is unknown triggers one refetch (at most every 30 s), which picks up a rotated key; a revoked key stops verifying once the cache ages out. The JWKS URL must be https in production. Nothing about keys is returned to clients.
+
+**Failure responses.** Any rejected token is the same generic `401 UNAUTHENTICATED` (no reason disclosed). If the JWKS cannot be fetched (timeout, network, bad response), the API answers `503 SERVICE_UNAVAILABLE`: an outage is not an authentication failure, and the mobile app keeps the user signed in and shows a retry state. PostgREST still verifies the forwarded token independently for every database call (defense in depth, §4 of Layer 4A).
+
+**Evidence.** Unit tests sign real ES256/RS256 tokens and serve a real local JWKS over HTTP (valid, expired, wrong issuer/audience/role, non-UUID sub, anonymous, tampered, unknown key, `alg: none`, HS256-in-jwks-mode, caching, rotation, revocation, JWKS outage); an integration test runs `GET /v1/profiles` through the app in `jwks` mode against the migrated schema. Verification against a live Supabase project is the opt-in `npm run test:live-env` suite (`40_Development_Environment.md`) and has **not** been run (no project exists yet).
