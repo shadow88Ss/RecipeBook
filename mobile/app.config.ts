@@ -59,6 +59,16 @@ const config: ExpoConfig = {
     ['expo-secure-store', { configureAndroidBackup: true, faceIDPermission: false }],
     'expo-localization',
     'expo-web-browser',
+    // Layer 12B barcode scanning: camera only (no microphone, no recording).
+    [
+      'expo-camera',
+      {
+        cameraPermission: 'MyRecipeBook uses the camera to read product barcodes. Only the barcode number is used.',
+        microphonePermission: false,
+        recordAudioAndroid: false,
+        barcodeScannerEnabled: true,
+      },
+    ],
   ],
   experiments: { typedRoutes: false },
   extra: { appEnvironment: environment },

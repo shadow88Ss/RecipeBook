@@ -2,7 +2,7 @@
 
 This is the runbook for the first live development environment: one Supabase development project, one development API reachable over HTTPS, and the mobile app on a physical phone through Expo Go. It never contains secret values. Every value marked *secret* goes only into the hosting provider's secret settings or a local, git-ignored `.env`.
 
-Status when this was written: **none of it exists yet.** No Supabase project, no deployed API and no phone test. Section 9 lists what is live-verified and what is mock-verified only.
+Status: the DEV project, the Render API and a first Expo Go launch exist (2026-10-02). Section 9 lists what is live-verified and what is mock-verified only.
 
 ---
 
@@ -271,18 +271,27 @@ Expo Go covers the alpha. For the barcode camera (12B) and later native health i
 
 Update this table when a live run happens: record the date, and the device and OS for phone tests.
 
+Last live run: 2026-10-01/02 on DEV project `psundpxqgiknxnjudmxv` (Singapore), with the API on Render (Starter, Singapore, commit `d9ab3b7`).
+
 | Area | Status | Evidence |
 |---|---|---|
-| Supabase Auth (sign-in, restore, refresh, sign-out) | MOCK VERIFIED ONLY | mobile tests run the real supabase-js against a scripted Auth endpoint |
-| API JWT verification: JWKS ES256/RS256 | MOCK VERIFIED ONLY (real crypto, local JWKS) | `accessTokenVerifier.test.ts`, `layer12a1.auth.api.test.ts`, built-entrypoint smoke |
-| API JWT verification against the live project | NOT TESTED | `npm run test:live-env` |
-| Profiles API | MOCK VERIFIED ONLY | local Postgres + RLS harness; mobile tests |
-| Daily Tracker | MOCK VERIFIED ONLY | same |
-| Progress | MOCK VERIFIED ONLY | same |
-| Real-project RLS | NOT TESTED | live smoke §28 block |
-| Migrations on Supabase | PARTIAL (DEV) | 45 migrations applied to DEV; privilege drift found (§2.1); migration 46 and re-verification pending |
-| Physical iPhone | NOT TESTED | §7 checklist |
+| Migrations on Supabase | LIVE VERIFIED | 46/46 applied; §2.2 checks A–O match the reference build (after migration 46) |
+| Real-project RLS | LIVE VERIFIED | SQL-editor cross-account check as both users; `npm run test:live-env` §28 (API + PostgREST) |
+| Auth provisioning (Account, AuthIdentity, default Profile) | LIVE VERIFIED | 2 users created through Supabase Auth; provisioning query |
+| API JWT verification against the live project (ES256/JWKS) | LIVE VERIFIED | `npm run test:live-env`: 14 passed, 1 skipped (expired-token check, optional) |
+| Supabase Auth (sign-in, refresh, sign-out revocation) | LIVE VERIFIED (API/SDK) | same run |
+| Profiles, Daily Tracker, Progress APIs | LIVE VERIFIED (read paths) | same run (empty-day values null, no combined score) |
+| API deployment `/health`, unauthenticated `401` | LIVE VERIFIED | browser checks against the Render URL |
+| Physical iPhone (iPhone 16 Pro, Expo Go SDK 57) | PARTIAL | app launched to the sign-in screen; §7 items 2–10 not yet reported |
 | Physical Android | NOT TESTED | §7 checklist |
+| Mobile food/product search, preview, logging (12B) | MOCK VERIFIED + LOCAL REAL-API CONTRACT CHECK | mobile tests; mobile request builders and response schemas run once against the real API on the local Postgres/RLS harness with test fixtures |
+| Mobile barcode camera (12B) | NOT TESTED on a device | camera is replaced by a stand-in in tests; lookup contract checked locally |
+| Reference data (Foods, Products) on DEV | NONE | no trusted ingestion workflow exists; DEV searches return no results (§10) |
 | Development build (EAS) | NOT TESTED | §8 |
-| FatSecret | NOT TESTED (not required for 12A.1) | Layer 11D opt-in live smoke |
-| Open Food Facts | NOT TESTED (not required for 12A.1) | Layer 11D opt-in live smoke |
+| FatSecret / Open Food Facts | NOT TESTED (not configured on DEV) | Layer 11D opt-in live smoke |
+
+## 10. Reference data on a new environment
+
+Foods, Food servings and nutrients, Products, label versions and barcodes are global reference data. Only a trusted ingestion workflow may write them, and none exists yet. The nutrient vocabulary is the one exception: it is seeded by a migration. So a new project has **no searchable Foods or Products**: mobile search shows "No foods found…", and a barcode scan finds nothing (or only an unconfirmed external candidate, if providers are configured).
+
+Do not insert Foods or Products by hand in the dashboard, and do not copy the API test fixtures into a real project. Making DEV searchable needs an approved, reviewed ingestion path (source dataset, licence, provenance, service-role execution outside the app). That is a separate decision.

@@ -162,3 +162,46 @@ export function EmptyState({ message, testID = 'empty-state' }: { message: strin
     </View>
   );
 }
+
+/** A selectable option (meal type, serving, unit). Selection is announced, not shown by colour alone. */
+export function Choice({ label, selected, onPress, testID }: { label: string; selected: boolean; onPress: () => void; testID?: string }) {
+  return (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityLabel={label}
+      accessibilityState={{ selected, checked: selected }}
+      onPress={onPress}
+      testID={testID}
+      style={{
+        minHeight: theme.touchTarget,
+        paddingHorizontal: theme.space.md,
+        borderRadius: theme.radius.md,
+        justifyContent: 'center',
+        borderWidth: selected ? 2 : 1,
+        borderColor: selected ? theme.color.primary : theme.color.border,
+        backgroundColor: selected ? theme.color.background : theme.color.surface,
+      }}
+    >
+      <RNText style={{ fontSize: theme.font.body, color: theme.color.text, fontWeight: selected ? '700' : '400' }}>{selected ? `✓ ${label}` : label}</RNText>
+    </Pressable>
+  );
+}
+
+export function ChoiceRow({ children }: { children: ReactNode }) {
+  return <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.sm }}>{children}</View>;
+}
+
+/** A tappable list row. */
+export function Row({ children, onPress, accessibilityLabel, testID }: { children: ReactNode; onPress: () => void; accessibilityLabel: string; testID?: string }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      onPress={onPress}
+      testID={testID}
+      style={({ pressed }) => ({ backgroundColor: theme.color.surface, borderRadius: theme.radius.md, padding: theme.space.lg, gap: theme.space.xs, minHeight: theme.touchTarget, opacity: pressed ? 0.8 : 1 })}
+    >
+      {children}
+    </Pressable>
+  );
+}

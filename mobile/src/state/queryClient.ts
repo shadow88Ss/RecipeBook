@@ -28,6 +28,14 @@ export const queryKeys = {
   dailyTrackerRoot: (profileId: string) => ['daily-tracker', profileId] as const,
   dailyTracker: (profileId: string, date: string, timezone: string) => ['daily-tracker', profileId, date, timezone] as const,
   progress: (profileId: string, from: string, to: string, timezone: string) => ['progress', profileId, from, to, timezone] as const,
+  // Layer 12B — global reference data (not profile-scoped) and server previews.
+  foodSearch: (q: string) => ['food-search', q] as const,
+  productSearch: (q: string) => ['product-search', q] as const,
+  food: (foodId: string) => ['food', foodId] as const,
+  product: (productId: string) => ['product', productId] as const,
+  units: () => ['units'] as const,
+  preview: (kind: 'food' | 'product', id: string, amount: string) => ['nutrition-preview', kind, id, amount] as const,
+  barcode: (code: string) => ['barcode', code] as const,
 } satisfies Record<string, (...args: never[]) => QueryKey>;
 
 /**

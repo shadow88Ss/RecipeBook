@@ -15,13 +15,14 @@ import { getDailyTracker } from '../../api/endpoints';
 import { formatNumber, t } from '../../i18n';
 import { addDays, deviceTimeZone, localDate } from '../../lib/dates';
 import { useSelectedProfile } from '../../profile/ProfileProvider';
+import { canLogMeals } from '../../profile/scope';
 import { useServices } from '../../state/AppProviders';
 import { queryKeys } from '../../state/queryClient';
 import { Button, Card, ErrorState, LoadingState, Screen, Text } from '../../ui';
 import { theme } from '../../ui/theme';
 import { comparisonText, coverageText, formatAmount, nutrientLabel, SUMMARY_UNITS, targetContextText } from './format';
 
-export function TodayScreen({ now = () => new Date(), timeZone }: { now?: () => Date; timeZone?: string }) {
+export function TodayScreen({ now = () => new Date(), timeZone, onLog }: { now?: () => Date; timeZone?: string; onLog?: () => void }) {
   const profile = useSelectedProfile();
   const { api } = useServices();
   const zone = useMemo(() => timeZone ?? deviceTimeZone(), [timeZone]);
@@ -37,6 +38,7 @@ export function TodayScreen({ now = () => new Date(), timeZone }: { now?: () => 
     <Screen testID="today-screen">
       <Text variant="title">{t('today.title')}</Text>
       <Text variant="muted">{profile.display_name}</Text>
+      {onLog && canLogMeals(profile.access_scope) ? <Button label={t('log.todayLog')} onPress={onLog} testID="today-log" /> : null}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.sm }}>
         <Button label={t('today.previousDay')} variant="secondary" onPress={() => setDate(addDays(date, -1))} testID="previous-day" />
         <View style={{ flex: 1, alignItems: 'center' }}>

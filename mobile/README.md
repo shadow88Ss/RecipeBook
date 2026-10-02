@@ -35,8 +35,8 @@ mobile/
     auth/                supabase-js auth client, secure storage adapter, auth service, AuthProvider, OAuth browser
     api/                 the one API client, error mapping, endpoints, contracts/ (zod DTOs from docs/30_API.md)
     profile/             ProfileProvider (selection context) and scope labels
-    features/            screens: auth, profile, today, progress, misc (log, more, settings, placeholders)
-    barcode/             barcode architecture (interface + API lookup), no scanner UI yet
+    features/            screens: auth, profile, today, progress, log (search, log item, scan), misc (more, settings, placeholders)
+    barcode/             barcode lookup contract and API call (the camera is features/log/CameraScanner)
     state/               services wiring, provider tree, TanStack Query client, navigation gate
     ui/                  theme and UI kit (Screen, Text, Button, Input, Card, Loading/Error/Empty, Notice)
     i18n/                English catalogue, t(), number formatting, RTL flag
@@ -134,7 +134,46 @@ There is no combined score and no judgement wording. The contract rejects a non-
 
 ## Log and barcode
 
-The Log tab is a shell in 12A. `src/barcode/barcode.ts` defines the architecture for Layer 12B: a `BarcodeSource` (camera scanner or manual entry) produces the raw scanned string, and `lookupBarcode()` sends it unchanged to `GET /v1/products/barcode/{code}/lookup`. The API normalizes the code and does the internal-first provider lookup; the app never normalizes barcodes or calls a product provider.
+Layer 12B. The flow is: Today → **Log food** → search → pick an item → amount and meal → server preview → **Log it** → back to Today, which re-reads the Daily Tracker.
+
+**Search.** The Log tab searches either generic **Foods** (`GET /v1/foods`, Layer 5A) or **branded products** (`GET /v1/products`, Layer 11A). Results are shown as the API returns them:
+- each row is labelled "Generic food" or "Branded product · brand", so the two kinds are never confused;
+- products show their market, package size and active barcodes;
+- a Food matched only through a suggested (AI) alias says so.
+
+**Amount.** The amount is either a count of one of the item's servings (Food servings, or the current label's Product servings), or a quantity in a unit code from the server's registry (`GET /v1/units`). The offered units are g, kg, oz, lb, ml, l, US cup, tbsp, tsp and fl oz, each shown only if the server lists it. Typed amounts accept a decimal comma. Zero, negative and non-numeric amounts are refused before any request.
+
+**Meal type.** Breakfast, lunch, dinner, snack or other: the API enum, with no default, so the user chooses.
+
+**Preview.** The server calculates the nutrition for the chosen amount:
+- `POST /v1/nutrition/calculate` for a Food;
+- `POST /v1/products/{id}/nutrition/calculate` for a Product.
+
+The preview shows the five summary values with their coverage, exactly like Today: an unknown value is "Not available", never 0. A Product without a label version cannot be logged, and an unverified label is called out. Nothing is calculated on the device.
+
+**Logging.** `POST /v1/profiles/{id}/meals` with:
+- the meal type;
+- today's local date and IANA time zone;
+- `consumed_at` (now);
+- one item: `food_id`, or `product_id` / `barcode`, plus a quantity and exactly one of a unit or a serving.
+
+No nutrition is sent: the server recalculates and stores the item's snapshot. A Product found by scanning is logged by its barcode, so the server records which barcode was used. After a successful log, `invalidateAfterNutritionWrite()` makes every cached day of that Profile's Daily Tracker and Progress re-read from the API.
+
+**Access.** Only scopes the API allows to log meals (`full_management`, `pediatric_weight_management`) get the Log, search, scan and Log-it UI. `view_only` and unknown scopes get a read-only notice. The server enforces this regardless (`403`/`404`).
+
+**Barcode scanning.** `CameraScanner` uses `expo-camera`, which is included in Expo Go SDK 57:
+- it reads product symbologies only (EAN-13/8, UPC-A/E, ITF-14) and passes on the raw text, once per code;
+- manual entry is always available, including when the camera is denied;
+- `lookupBarcode()` sends the raw string to `GET /v1/products/barcode/{code}/lookup`, and the API normalizes it and runs the internal-first lookup.
+
+There are three possible results:
+- **Internal Product.** It is shown with **Log this product** (normal Product logging).
+- **External candidate.** It is shown as **"Not yet in MyRecipeBook"**: unconfirmed provider information, with the provider's attribution, licence and link. It has **no log action**, and a response claiming a loggable candidate is rejected as an invalid contract. No candidate→Product confirmation workflow exists yet, so a candidate cannot be used until trusted ingestion adds it.
+- **Nothing found.** The screen also says when outside sources could not be checked.
+
+**Reference data.** Food and Product rows are global reference data written only by trusted ingestion, and no ingestion workflow exists yet. A new Supabase project therefore has no Foods or Products: searches return "No foods found…", and scans return "not found" (or an external candidate when providers are configured). Test fixtures exist only in the API test harness.
+
+**Not in 12B:** correcting a logged item (the API's correction endpoint exists; the UI has no logged-item list to start from yet), Recipe, Meal Plan and Grocery UI, AI logging, health integrations.
 
 ## State
 
@@ -204,9 +243,10 @@ Troubleshooting:
 
 ## Expo Go or a development build
 
-**Expo Go is the target for the alpha.** Every native module used (expo-router, expo-secure-store, expo-localization, expo-web-browser, expo-linking, expo-constants, react-native-safe-area-context, react-native-screens) ships in Expo Go SDK 57, and the rest is JavaScript (supabase-js, TanStack Query, zod).
+**Expo Go is the target for the alpha.** Every native module used (expo-router, expo-secure-store, expo-localization, expo-web-browser, expo-linking, expo-constants, expo-camera, react-native-safe-area-context, react-native-screens) ships in Expo Go SDK 57, and the rest is JavaScript (supabase-js, TanStack Query, zod).
 
 - Secure storage works in Expo Go: values go to the Keychain / Keystore under Expo Go's own app identity. The placeholder bundle id, the Android backup exclusion and the app's own URL scheme only take effect in a development or store build.
+- In Expo Go, the camera permission prompt is Expo Go's own. The `expo-camera` config plugin sets the app's camera-only permission text (no microphone) for development and store builds.
 - In Expo Go, the OAuth redirect is an `exp://` URL, which would have to be allowed in Supabase. Google/Apple are disabled for now anyway.
 
 **Development build:** prepared, not built. `eas.json` has `development`, `development-simulator` and `preview` profiles (no production or submit profile). The first development build also needs `npx expo install expo-dev-client`, an Expo account, EAS environment variables for the `EXPO_PUBLIC_*` values, and Apple/Google developer accounts; see `docs/40_Development_Environment.md` §8. Nothing has been built or published.

@@ -17,16 +17,6 @@ export function PlaceholderScreen({ titleKey, testID }: { titleKey: MessageKey; 
   );
 }
 
-/** §27: the Log area is a shell in 12A; logging and the scanner are Layer 12B. */
-export function LogScreen() {
-  return (
-    <Screen testID="log-screen">
-      <Text variant="title">{t('log.title')}</Text>
-      <Text variant="muted">{t('log.body')}</Text>
-    </Screen>
-  );
-}
-
 export function MoreScreen({ onOpen }: { onOpen: (area: 'recipes' | 'plan' | 'grocery') => void }) {
   return (
     <Screen testID="more-screen">

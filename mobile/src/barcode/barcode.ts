@@ -1,4 +1,4 @@
-// Layer 12A §28 — barcode architecture only (the scanner UI is Layer 12B).
+// Layer 12A §28 / 12B — barcode lookup.
 //
 //   camera / manual entry  ->  raw scanned string  ->  API lookup
 //
@@ -6,23 +6,47 @@
 // type: the raw string goes to the API, which applies the Layer 11A rules and
 // the Layer 11D internal-first provider lookup. The app never calls a product
 // provider (FatSecret, Open Food Facts, retailers) directly.
+//
+// An external candidate is NOT a Product: it is unconfirmed provider data,
+// never loggable (the API marks it `loggable: false`). There is no approved
+// candidate -> Product confirmation workflow yet, so the app only shows it,
+// with the provider's attribution, and offers no way to log it.
 
 import { z } from 'zod';
 
 import type { ApiClient } from '../api/client';
+import { productDetailSchema } from '../api/contracts/catalog';
 
-/** A source of scanned codes (camera scanner in 12B, or manual entry). */
+/** A source of scanned codes (camera scanner, or manual entry). */
 export interface BarcodeSource {
   /** Resolves with the raw scanned text, or null if the user cancelled. */
   scan(): Promise<string | null>;
 }
 
-/** The fields 12B needs to decide what to show; the rest stays server-side. */
+export const externalCandidateSchema = z.object({
+  status: z.literal('unconfirmed_external_candidate'),
+  loggable: z.literal(false),
+  provider_key: z.string(),
+  external_product_id: z.string(),
+  brand_name: z.string().nullable(),
+  product_name: z.string().nullable(),
+  variant_name: z.string().nullable().optional(),
+  barcode: z.object({ canonical_gtin: z.string() }).nullable(),
+  provenance: z.object({
+    provider_record_url: z.string().nullable(),
+    attribution: z.object({ required: z.boolean(), text: z.string().nullable(), link: z.string().nullable(), licence: z.string().nullable() }),
+  }),
+  completeness: z.object({ nutrition: z.string() }),
+});
+export type ExternalCandidate = z.infer<typeof externalCandidateSchema>;
+
+/** The fields the app needs to decide what to show; the rest stays server-side. */
 export const barcodeLookupSchema = z.object({
-  source: z.string(),
-  match: z.unknown(),
-  product: z.unknown(),
-  candidates: z.array(z.unknown()),
+  submitted: z.object({ canonical_gtin: z.string() }).partial().optional(),
+  source: z.enum(['internal', 'external_candidate', 'none']),
+  product: productDetailSchema.nullable(),
+  candidates: z.array(externalCandidateSchema),
+  external_lookup: z.object({ status: z.string() }).nullable().optional(),
   next_step: z.string().nullable().optional(),
 });
 export type BarcodeLookup = z.infer<typeof barcodeLookupSchema>;
