@@ -11,7 +11,8 @@ import { rebuildTestDatabase } from '../helpers/testDb';
 
 const ALIGNMENT = '20261014120000_align_supabase_default_privileges.sql';
 
-// Every direct table privilege of `authenticated` (117). `anon` has none.
+// Every direct table privilege of `authenticated` (118: 117 from migrations
+// 1-46 + SELECT on food_source_record, Layer 12B.1). `anon` has none.
 const AUTHENTICATED_TABLE_PRIVILEGES: Record<string, string> = {
   account: 'SELECT,INSERT,UPDATE',
   activity: 'SELECT,INSERT',
@@ -28,6 +29,7 @@ const AUTHENTICATED_TABLE_PRIVILEGES: Record<string, string> = {
   food_alias: 'SELECT',
   food_nutrient: 'SELECT',
   food_serving: 'SELECT',
+  food_source_record: 'SELECT',
   goal: 'SELECT,INSERT,UPDATE,DELETE',
   grocery_item_already_have: 'SELECT,INSERT,UPDATE',
   grocery_item_shopping_adjustment: 'SELECT,INSERT,UPDATE',
@@ -138,10 +140,10 @@ describe('privilege model under Supabase default privileges', () => {
     expect(await tablePrivileges(pool, 'anon')).toEqual({});
   });
 
-  it('authenticated holds exactly the validated table privileges (117)', async () => {
+  it('authenticated holds exactly the validated table privileges (118)', async () => {
     const actual = await tablePrivileges(pool, 'authenticated');
     expect(actual).toEqual(AUTHENTICATED_TABLE_PRIVILEGES);
-    expect(Object.values(actual).join(',').split(',')).toHaveLength(117);
+    expect(Object.values(actual).join(',').split(',')).toHaveLength(118);
   });
 
   it('anon can execute only the two pure gtin helpers', async () => {

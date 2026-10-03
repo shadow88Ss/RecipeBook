@@ -1,0 +1,50 @@
+{
+  "_comment": "TEST FIXTURE ONLY. Shaped like a USDA FoodData Central SR Legacy JSON download. Identifiers, descriptions and values are invented for tests and are NOT USDA data.",
+  "SRLegacyFoods": [
+    {
+      "fdcId": 990000001,
+      "description": "Testfood, alpha, raw",
+      "dataType": "SR Legacy",
+      "ndbNumber": 99001,
+      "publicationDate": "4/1/2019",
+      "foodCategory": { "description": "Test Category" },
+      "foodNutrients": [
+        { "nutrient": { "id": 1008, "number": "208", "name": "Energy", "unitName": "kcal" }, "amount": 150 },
+        { "nutrient": { "id": 1062, "number": "268", "name": "Energy", "unitName": "kJ" }, "amount": 628 },
+        { "nutrient": { "id": 1003, "number": "203", "name": "Protein", "unitName": "g" }, "amount": 10 },
+        { "nutrient": { "id": 1004, "number": "204", "name": "Total lipid (fat)", "unitName": "g" }, "amount": 5 },
+        { "nutrient": { "id": 1005, "number": "205", "name": "Carbohydrate, by difference", "unitName": "g" }, "amount": 12 },
+        { "nutrient": { "id": 1079, "number": "291", "name": "Fiber, total dietary", "unitName": "g" }, "amount": 0 },
+        { "nutrient": { "id": 1106, "number": "320", "name": "Vitamin A, RAE", "unitName": "µg" }, "amount": 40 },
+        { "nutrient": { "id": 1104, "number": "318", "name": "Vitamin A, IU", "unitName": "IU" }, "amount": 133 },
+        { "nutrient": { "id": 1185, "number": "430", "name": "Vitamin K (phylloquinone)", "unitName": "µg" }, "amount": 3 },
+        { "nutrient": { "id": 1177, "number": "417", "name": "Folate, total", "unitName": "µg" }, "amount": 20 }
+      ],
+      "foodPortions": [
+        { "sequenceNumber": 1, "amount": 1, "modifier": "piece", "gramWeight": 40, "measureUnit": { "name": "undetermined" } },
+        { "sequenceNumber": 2, "amount": 0.5, "modifier": "cup, sliced", "gramWeight": 60, "measureUnit": { "name": "undetermined" } },
+        { "sequenceNumber": 3, "amount": 1, "modifier": "serving", "measureUnit": { "name": "undetermined" } }
+      ]
+    },
+    {
+      "fdcId": 990000002,
+      "description": "Testfood, beta, cooked",
+      "dataType": "SR Legacy",
+      "ndbNumber": "99002",
+      "foodCategory": { "description": "Test Category" },
+      "foodNutrients": [
+        { "nutrient": { "id": 1008, "number": "208", "name": "Energy", "unitName": "KCAL" }, "amount": 80 },
+        { "nutrient": { "id": 1003, "number": "203", "name": "Protein", "unitName": "G" }, "amount": 2.5 }
+      ],
+      "foodPortions": []
+    },
+    {
+      "fdcId": 990000003,
+      "description": "Testfood, gamma, not selected",
+      "dataType": "SR Legacy",
+      "ndbNumber": 99003,
+      "foodNutrients": [],
+      "foodPortions": []
+    }
+  ]
+}

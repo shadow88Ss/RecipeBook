@@ -1,0 +1,726 @@
+{
+ "manifest_version": 1,
+ "name": "dev-bootstrap-2026-10",
+ "source": {
+  "system": "usda_fdc",
+  "dataset": "sr_legacy"
+ },
+ "foods": [
+  {
+   "ndb_number": "01123",
+   "description": "Egg, whole, raw, fresh"
+  },
+  {
+   "ndb_number": "01124",
+   "description": "Egg, white, raw, fresh"
+  },
+  {
+   "ndb_number": "01125",
+   "description": "Egg, yolk, raw, fresh"
+  },
+  {
+   "ndb_number": "01128",
+   "description": "Egg, whole, cooked, fried"
+  },
+  {
+   "ndb_number": "01129",
+   "description": "Egg, whole, cooked, hard-boiled"
+  },
+  {
+   "ndb_number": "05062",
+   "description": "Chicken, broiler or fryers, breast, skinless, boneless, meat only, raw"
+  },
+  {
+   "ndb_number": "05064",
+   "description": "Chicken, broilers or fryers, breast, meat only, cooked, roasted"
+  },
+  {
+   "ndb_number": "05057",
+   "description": "Chicken, broilers or fryers, breast, meat and skin, raw"
+  },
+  {
+   "ndb_number": "05098",
+   "description": "Chicken, broilers or fryers, thigh, meat only, cooked, roasted"
+  },
+  {
+   "ndb_number": "05219",
+   "description": "Turkey, breast, from whole bird, meat only, raw"
+  },
+  {
+   "ndb_number": "05220",
+   "description": "Turkey, breast, from whole bird, meat only, roasted"
+  },
+  {
+   "ndb_number": "05711",
+   "description": "Turkey, retail parts, breast, meat only, cooked, roasted"
+  },
+  {
+   "ndb_number": "23562",
+   "description": "Beef, ground, 90% lean meat / 10% fat, raw"
+  },
+  {
+   "ndb_number": "23565",
+   "description": "Beef, ground, 90% lean meat / 10% fat, crumbles, cooked, pan-browned"
+  },
+  {
+   "ndb_number": "23567",
+   "description": "Beef, ground, 85% lean meat / 15% fat, raw"
+  },
+  {
+   "ndb_number": "23570",
+   "description": "Beef, ground, 85% lean meat / 15% fat, crumbles, cooked, pan-browned"
+  },
+  {
+   "ndb_number": "13929",
+   "description": "Beef, top sirloin, steak, separable lean and fat, trimmed to 1/8\" fat, all grades, raw"
+  },
+  {
+   "ndb_number": "13930",
+   "description": "Beef, top sirloin, steak, separable lean and fat, trimmed to 1/8\" fat, all grades, cooked, broiled"
+  },
+  {
+   "ndb_number": "17224",
+   "description": "Lamb, ground, raw"
+  },
+  {
+   "ndb_number": "17225",
+   "description": "Lamb, ground, cooked, broiled"
+  },
+  {
+   "ndb_number": "10060",
+   "description": "Pork, fresh, loin, tenderloin, separable lean only, raw"
+  },
+  {
+   "ndb_number": "10061",
+   "description": "Pork, fresh, loin, tenderloin, separable lean only, cooked, roasted"
+  },
+  {
+   "ndb_number": "15236",
+   "description": "Fish, salmon, Atlantic, farmed, raw"
+  },
+  {
+   "ndb_number": "15237",
+   "description": "Fish, salmon, Atlantic, farmed, cooked, dry heat"
+  },
+  {
+   "ndb_number": "15085",
+   "description": "Fish, salmon, sockeye, raw"
+  },
+  {
+   "ndb_number": "15086",
+   "description": "Fish, salmon, sockeye, cooked, dry heat"
+  },
+  {
+   "ndb_number": "15015",
+   "description": "Fish, cod, Atlantic, raw"
+  },
+  {
+   "ndb_number": "15016",
+   "description": "Fish, cod, Atlantic, cooked, dry heat"
+  },
+  {
+   "ndb_number": "15121",
+   "description": "Fish, tuna, light, canned in water, drained solids"
+  },
+  {
+   "ndb_number": "15083",
+   "description": "Fish, salmon, pink, raw"
+  },
+  {
+   "ndb_number": "15046",
+   "description": "Fish, mackerel, Atlantic, raw"
+  },
+  {
+   "ndb_number": "15270",
+   "description": "Crustaceans, shrimp, raw (not previously frozen)"
+  },
+  {
+   "ndb_number": "15271",
+   "description": "Crustaceans, shrimp, cooked (not previously frozen)"
+  },
+  {
+   "ndb_number": "15164",
+   "description": "Mollusks, mussel, blue, raw"
+  },
+  {
+   "ndb_number": "15165",
+   "description": "Mollusks, mussel, blue, cooked, moist heat"
+  },
+  {
+   "ndb_number": "20044",
+   "description": "Rice, white, long-grain, regular, raw, enriched"
+  },
+  {
+   "ndb_number": "20345",
+   "description": "Rice, white, long-grain, regular, cooked, enriched, with salt"
+  },
+  {
+   "ndb_number": "20444",
+   "description": "Rice, white, long-grain, regular, raw, unenriched"
+  },
+  {
+   "ndb_number": "20545",
+   "description": "Rice, white, long-grain, regular, cooked, unenriched, with salt"
+  },
+  {
+   "ndb_number": "20036",
+   "description": "Rice, brown, long-grain, raw"
+  },
+  {
+   "ndb_number": "20037",
+   "description": "Rice, brown, long-grain, cooked"
+  },
+  {
+   "ndb_number": "20035",
+   "description": "Quinoa, uncooked"
+  },
+  {
+   "ndb_number": "20137",
+   "description": "Quinoa, cooked"
+  },
+  {
+   "ndb_number": "08120",
+   "description": "Cereals, oats, regular and quick, not fortified, dry"
+  },
+  {
+   "ndb_number": "08121",
+   "description": "Cereals, oats, regular and quick, unenriched, cooked with water (includes boiling and microwaving), without salt"
+  },
+  {
+   "ndb_number": "20038",
+   "description": "Oats"
+  },
+  {
+   "ndb_number": "20120",
+   "description": "Pasta, dry, enriched"
+  },
+  {
+   "ndb_number": "20121",
+   "description": "Pasta, cooked, enriched, without added salt"
+  },
+  {
+   "ndb_number": "20028",
+   "description": "Couscous, dry"
+  },
+  {
+   "ndb_number": "20029",
+   "description": "Couscous, cooked"
+  },
+  {
+   "ndb_number": "20012",
+   "description": "Bulgur, dry"
+  },
+  {
+   "ndb_number": "20013",
+   "description": "Bulgur, cooked"
+  },
+  {
+   "ndb_number": "20005",
+   "description": "Barley, pearled, raw"
+  },
+  {
+   "ndb_number": "20006",
+   "description": "Barley, pearled, cooked"
+  },
+  {
+   "ndb_number": "18069",
+   "description": "Bread, white, commercially prepared (includes soft bread crumbs)"
+  },
+  {
+   "ndb_number": "18075",
+   "description": "Bread, whole-wheat, commercially prepared"
+  },
+  {
+   "ndb_number": "18041",
+   "description": "Bread, pita, white, enriched"
+  },
+  {
+   "ndb_number": "18042",
+   "description": "Bread, pita, whole-wheat"
+  },
+  {
+   "ndb_number": "18060",
+   "description": "Bread, rye"
+  },
+  {
+   "ndb_number": "18363",
+   "description": "Tortillas, ready-to-bake or -fry, corn"
+  },
+  {
+   "ndb_number": "18364",
+   "description": "Tortillas, ready-to-bake or -fry, flour, refrigerated"
+  },
+  {
+   "ndb_number": "28295",
+   "description": "Tortillas, ready-to-bake or -fry, whole wheat"
+  },
+  {
+   "ndb_number": "11352",
+   "description": "Potatoes, flesh and skin, raw"
+  },
+  {
+   "ndb_number": "11674",
+   "description": "Potatoes, baked, flesh and skin, without salt"
+  },
+  {
+   "ndb_number": "11363",
+   "description": "Potatoes, baked, flesh, without salt"
+  },
+  {
+   "ndb_number": "11365",
+   "description": "Potatoes, boiled, cooked in skin, flesh, without salt"
+  },
+  {
+   "ndb_number": "11367",
+   "description": "Potatoes, boiled, cooked without skin, flesh, without salt"
+  },
+  {
+   "ndb_number": "11507",
+   "description": "Sweet potato, raw, unprepared"
+  },
+  {
+   "ndb_number": "11508",
+   "description": "Sweet potato, cooked, baked in skin, flesh, without salt"
+  },
+  {
+   "ndb_number": "16069",
+   "description": "Lentils, raw"
+  },
+  {
+   "ndb_number": "16070",
+   "description": "Lentils, mature seeds, cooked, boiled, without salt"
+  },
+  {
+   "ndb_number": "16015",
+   "description": "Beans, black, mature seeds, cooked, boiled, without salt"
+  },
+  {
+   "ndb_number": "16028",
+   "description": "Beans, kidney, all types, mature seeds, cooked, boiled, without salt"
+  },
+  {
+   "ndb_number": "16043",
+   "description": "Beans, pinto, mature seeds, cooked, boiled, without salt"
+  },
+  {
+   "ndb_number": "16056",
+   "description": "Chickpeas (garbanzo beans, bengal gram), mature seeds, raw"
+  },
+  {
+   "ndb_number": "16057",
+   "description": "Chickpeas (garbanzo beans, bengal gram), mature seeds, cooked, boiled, without salt"
+  },
+  {
+   "ndb_number": "16058",
+   "description": "Chickpeas (garbanzo beans, bengal gram), mature seeds, canned, solids and liquids"
+  },
+  {
+   "ndb_number": "16137",
+   "description": "Hummus, home prepared"
+  },
+  {
+   "ndb_number": "16126",
+   "description": "Tofu, firm, prepared with calcium sulfate and magnesium chloride (nigari)"
+  },
+  {
+   "ndb_number": "16127",
+   "description": "Tofu, soft, prepared with calcium sulfate and magnesium chloride (nigari)"
+  },
+  {
+   "ndb_number": "11090",
+   "description": "Broccoli, raw"
+  },
+  {
+   "ndb_number": "11091",
+   "description": "Broccoli, cooked, boiled, drained, without salt"
+  },
+  {
+   "ndb_number": "11457",
+   "description": "Spinach, raw"
+  },
+  {
+   "ndb_number": "11458",
+   "description": "Spinach, cooked, boiled, drained, without salt"
+  },
+  {
+   "ndb_number": "11124",
+   "description": "Carrots, raw"
+  },
+  {
+   "ndb_number": "11125",
+   "description": "Carrots, cooked, boiled, drained, without salt"
+  },
+  {
+   "ndb_number": "11529",
+   "description": "Tomatoes, red, ripe, raw, year round average"
+  },
+  {
+   "ndb_number": "11011",
+   "description": "Asparagus, raw"
+  },
+  {
+   "ndb_number": "11080",
+   "description": "Beets, raw"
+  },
+  {
+   "ndb_number": "11109",
+   "description": "Cabbage, raw"
+  },
+  {
+   "ndb_number": "11135",
+   "description": "Cauliflower, raw"
+  },
+  {
+   "ndb_number": "11143",
+   "description": "Celery, raw"
+  },
+  {
+   "ndb_number": "11205",
+   "description": "Cucumber, with peel, raw"
+  },
+  {
+   "ndb_number": "11209",
+   "description": "Eggplant, raw"
+  },
+  {
+   "ndb_number": "11215",
+   "description": "Garlic, raw"
+  },
+  {
+   "ndb_number": "11233",
+   "description": "Kale, raw"
+  },
+  {
+   "ndb_number": "11167",
+   "description": "Corn, sweet, yellow, raw"
+  },
+  {
+   "ndb_number": "11304",
+   "description": "Peas, green, raw"
+  },
+  {
+   "ndb_number": "11282",
+   "description": "Onions, raw"
+  },
+  {
+   "ndb_number": "11821",
+   "description": "Peppers, sweet, red, raw"
+  },
+  {
+   "ndb_number": "11333",
+   "description": "Peppers, sweet, green, raw"
+  },
+  {
+   "ndb_number": "11477",
+   "description": "Squash, summer, zucchini, includes skin, raw"
+  },
+  {
+   "ndb_number": "11260",
+   "description": "Mushrooms, white, raw"
+  },
+  {
+   "ndb_number": "11251",
+   "description": "Lettuce, cos or romaine, raw"
+  },
+  {
+   "ndb_number": "11252",
+   "description": "Lettuce, iceberg (includes crisphead types), raw"
+  },
+  {
+   "ndb_number": "11098",
+   "description": "Brussels sprouts, raw"
+  },
+  {
+   "ndb_number": "11429",
+   "description": "Radishes, raw"
+  },
+  {
+   "ndb_number": "09003",
+   "description": "Apples, raw, with skin"
+  },
+  {
+   "ndb_number": "09040",
+   "description": "Bananas, raw"
+  },
+  {
+   "ndb_number": "09200",
+   "description": "Oranges, raw, all commercial varieties"
+  },
+  {
+   "ndb_number": "09037",
+   "description": "Avocados, raw, all commercial varieties"
+  },
+  {
+   "ndb_number": "09021",
+   "description": "Apricots, raw"
+  },
+  {
+   "ndb_number": "09050",
+   "description": "Blueberries, raw"
+  },
+  {
+   "ndb_number": "09070",
+   "description": "Cherries, sweet, raw"
+  },
+  {
+   "ndb_number": "09087",
+   "description": "Dates, deglet noor"
+  },
+  {
+   "ndb_number": "09421",
+   "description": "Dates, medjool"
+  },
+  {
+   "ndb_number": "09089",
+   "description": "Figs, raw"
+  },
+  {
+   "ndb_number": "09132",
+   "description": "Grapes, red or green (European type, such as Thompson seedless), raw"
+  },
+  {
+   "ndb_number": "09148",
+   "description": "Kiwifruit, green, raw"
+  },
+  {
+   "ndb_number": "09150",
+   "description": "Lemons, raw, without peel"
+  },
+  {
+   "ndb_number": "09176",
+   "description": "Mangos, raw"
+  },
+  {
+   "ndb_number": "09181",
+   "description": "Melons, cantaloupe, raw"
+  },
+  {
+   "ndb_number": "09316",
+   "description": "Strawberries, raw"
+  },
+  {
+   "ndb_number": "09266",
+   "description": "Pineapple, raw, all varieties"
+  },
+  {
+   "ndb_number": "09326",
+   "description": "Watermelon, raw"
+  },
+  {
+   "ndb_number": "09252",
+   "description": "Pears, raw"
+  },
+  {
+   "ndb_number": "09236",
+   "description": "Peaches, yellow, raw"
+  },
+  {
+   "ndb_number": "09286",
+   "description": "Pomegranates, raw"
+  },
+  {
+   "ndb_number": "09302",
+   "description": "Raspberries, raw"
+  },
+  {
+   "ndb_number": "09279",
+   "description": "Plums, raw"
+  },
+  {
+   "ndb_number": "09298",
+   "description": "Raisins, seedless"
+  },
+  {
+   "ndb_number": "09206",
+   "description": "Orange juice, raw"
+  },
+  {
+   "ndb_number": "09016",
+   "description": "Apple juice, canned or bottled, unsweetened, without added ascorbic acid"
+  },
+  {
+   "ndb_number": "01077",
+   "description": "Milk, whole, 3.25% milkfat, with added vitamin D"
+  },
+  {
+   "ndb_number": "01079",
+   "description": "Milk, reduced fat, fluid, 2% milkfat, with added vitamin A and vitamin D"
+  },
+  {
+   "ndb_number": "01082",
+   "description": "Milk, lowfat, fluid, 1% milkfat, with added vitamin A and vitamin D"
+  },
+  {
+   "ndb_number": "01085",
+   "description": "Milk, nonfat, fluid, with added vitamin A and vitamin D (fat free or skim)"
+  },
+  {
+   "ndb_number": "01116",
+   "description": "Yogurt, plain, whole milk, 8 grams protein per 8 ounce"
+  },
+  {
+   "ndb_number": "01117",
+   "description": "Yogurt, plain, low fat, 12 grams protein per 8 ounce"
+  },
+  {
+   "ndb_number": "01118",
+   "description": "Yogurt, plain, skim milk, 13 grams protein per 8 ounce"
+  },
+  {
+   "ndb_number": "01256",
+   "description": "Yogurt, Greek, plain, nonfat"
+  },
+  {
+   "ndb_number": "01287",
+   "description": "Yogurt, Greek, plain, lowfat"
+  },
+  {
+   "ndb_number": "01293",
+   "description": "Yogurt, Greek, plain, whole milk"
+  },
+  {
+   "ndb_number": "01009",
+   "description": "Cheese, cheddar"
+  },
+  {
+   "ndb_number": "01019",
+   "description": "Cheese, feta"
+  },
+  {
+   "ndb_number": "01026",
+   "description": "Cheese, mozzarella, whole milk"
+  },
+  {
+   "ndb_number": "01028",
+   "description": "Cheese, mozzarella, part skim milk"
+  },
+  {
+   "ndb_number": "01032",
+   "description": "Cheese, parmesan, grated"
+  },
+  {
+   "ndb_number": "01012",
+   "description": "Cheese, cottage, creamed, large or small curd"
+  },
+  {
+   "ndb_number": "01015",
+   "description": "Cheese, cottage, lowfat, 2% milkfat"
+  },
+  {
+   "ndb_number": "01016",
+   "description": "Cheese, cottage, lowfat, 1% milkfat"
+  },
+  {
+   "ndb_number": "01017",
+   "description": "Cheese, cream"
+  },
+  {
+   "ndb_number": "01036",
+   "description": "Cheese, ricotta, whole milk"
+  },
+  {
+   "ndb_number": "01040",
+   "description": "Cheese, swiss"
+  },
+  {
+   "ndb_number": "01001",
+   "description": "Butter, salted"
+  },
+  {
+   "ndb_number": "01145",
+   "description": "Butter, without salt"
+  },
+  {
+   "ndb_number": "01053",
+   "description": "Cream, fluid, heavy whipping"
+  },
+  {
+   "ndb_number": "12061",
+   "description": "Nuts, almonds"
+  },
+  {
+   "ndb_number": "12063",
+   "description": "Nuts, almonds, dry roasted, without salt added"
+  },
+  {
+   "ndb_number": "12087",
+   "description": "Nuts, cashew nuts, raw"
+  },
+  {
+   "ndb_number": "12085",
+   "description": "Nuts, cashew nuts, dry roasted, without salt added"
+  },
+  {
+   "ndb_number": "12155",
+   "description": "Nuts, walnuts, english"
+  },
+  {
+   "ndb_number": "12151",
+   "description": "Nuts, pistachio nuts, raw"
+  },
+  {
+   "ndb_number": "12152",
+   "description": "Nuts, pistachio nuts, dry roasted, without salt added"
+  },
+  {
+   "ndb_number": "12142",
+   "description": "Nuts, pecans"
+  },
+  {
+   "ndb_number": "12131",
+   "description": "Nuts, macadamia nuts, raw"
+  },
+  {
+   "ndb_number": "16390",
+   "description": "Peanuts, all types, dry-roasted, without salt"
+  },
+  {
+   "ndb_number": "16090",
+   "description": "Peanuts, all types, dry-roasted, with salt"
+  },
+  {
+   "ndb_number": "16098",
+   "description": "Peanut butter, smooth style, with salt"
+  },
+  {
+   "ndb_number": "16398",
+   "description": "Peanut butter, smooth style, without salt"
+  },
+  {
+   "ndb_number": "12006",
+   "description": "Seeds, chia seeds, dried"
+  },
+  {
+   "ndb_number": "12220",
+   "description": "Seeds, flaxseed"
+  },
+  {
+   "ndb_number": "12036",
+   "description": "Seeds, sunflower seed kernels, dried"
+  },
+  {
+   "ndb_number": "12014",
+   "description": "Seeds, pumpkin and squash seed kernels, dried"
+  },
+  {
+   "ndb_number": "12166",
+   "description": "Seeds, sesame butter, tahini, from roasted and toasted kernels (most common type)"
+  },
+  {
+   "ndb_number": "04053",
+   "description": "Oil, olive, salad or cooking"
+  },
+  {
+   "ndb_number": "04582",
+   "description": "Oil, canola"
+  },
+  {
+   "ndb_number": "19296",
+   "description": "Honey"
+  },
+  {
+   "ndb_number": "19335",
+   "description": "Sugars, granulated"
+  }
+ ]
+}

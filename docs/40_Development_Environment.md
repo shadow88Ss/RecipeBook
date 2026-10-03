@@ -26,7 +26,7 @@ Status: the DEV project, the Render API and a first Expo Go launch exist (2026-1
 
 ## 2. Apply the migrations
 
-The schema is defined only by `supabase/migrations/` (46 files). Never recreate objects by hand in the dashboard.
+The schema is defined only by `supabase/migrations/` (47 files). Never recreate objects by hand in the dashboard.
 
 ```bash
 npm install -g supabase            # or: npx supabase@latest …
@@ -85,25 +85,25 @@ union all select 'O default_privileges_to_anon_or_authenticated', coalesce(strin
 order by 1;
 ```
 
-Expected (identical for a clean local build and for the live project):
+Expected (identical for a clean local build and for the live project). The current values are for all 47 migrations. Migration 47 (`food_source_record`, Layer 12B.1) adds one table, one policy and one trigger, plus SELECT for `authenticated`. The "after 46" column is kept for history.
 
-| Check | Expected |
-|---|---|
-| A tables | `56` |
-| B tables_without_rls | `none` |
-| C policies | `139` |
-| D policy_fingerprint | `9dabbfc03377a67fe0e18541b05ccd77` |
-| E functions | `69` |
-| F function_fingerprint | `5e87f01de9c92c62c6eb1a6564564f49` |
-| G triggers | `83` |
-| H trigger_fingerprint | `141516ac388d47733b9c5994a076c3d5` |
-| I auth_identities_triggers | `on_auth_identity_created` |
-| J anon_table_privileges | `0` |
-| K authenticated_table_privileges | `117` |
-| L authenticated_privilege_fingerprint | `a955e41b8f25396d503190c33ac443f1` |
-| M anon_executable_functions | `2` (the two `gtin_*` helpers) |
-| N authenticated_executable_functions | the 20 functions below |
-| O default_privileges_to_anon_or_authenticated | `none` |
+| Check | Expected (47 migrations) | After 46 |
+|---|---|---|
+| A tables | `57` | `56` |
+| B tables_without_rls | `none` | `none` |
+| C policies | `140` | `139` |
+| D policy_fingerprint | `b61e94a3ad0e928953a859c188f6f7ad` | `9dabbfc03377a67fe0e18541b05ccd77` |
+| E functions | `69` | `69` |
+| F function_fingerprint | `5e87f01de9c92c62c6eb1a6564564f49` | same |
+| G triggers | `84` | `83` |
+| H trigger_fingerprint | `6f0bd61fdf31e166cc68932ca2d9a4b8` | `141516ac388d47733b9c5994a076c3d5` |
+| I auth_identities_triggers | `on_auth_identity_created` | same |
+| J anon_table_privileges | `0` | `0` |
+| K authenticated_table_privileges | `118` | `117` |
+| L authenticated_privilege_fingerprint | `534fef2dea06d7223c9fe30bed4509e8` | `a955e41b8f25396d503190c33ac443f1` |
+| M anon_executable_functions | `2` (the two `gtin_*` helpers) | `2` |
+| N authenticated_executable_functions | the 20 functions below | same |
+| O default_privileges_to_anon_or_authenticated | `none` | `none` |
 
 N, in order:
 
@@ -286,12 +286,74 @@ Last live run: 2026-10-01/02 on DEV project `psundpxqgiknxnjudmxv` (Singapore), 
 | Physical Android | NOT TESTED | §7 checklist |
 | Mobile food/product search, preview, logging (12B) | MOCK VERIFIED + LOCAL REAL-API CONTRACT CHECK | mobile tests; mobile request builders and response schemas run once against the real API on the local Postgres/RLS harness with test fixtures |
 | Mobile barcode camera (12B) | NOT TESTED on a device | camera is replaced by a stand-in in tests; lookup contract checked locally |
-| Reference data (Foods, Products) on DEV | NONE | no trusted ingestion workflow exists; DEV searches return no results (§10) |
+| Trusted USDA ingestion (12B.1) | LOCAL VERIFIED | tests; full 179-food selection dry-run/applied/re-run locally with SR28-derived values in the SR Legacy shape (§10) |
+| Reference Foods on DEV | NOT LOADED YET | load with §10.5 after migration 47 is applied |
+| Reference Products on DEV | NONE | no Product ingestion yet |
 | Development build (EAS) | NOT TESTED | §8 |
 | FatSecret / Open Food Facts | NOT TESTED (not configured on DEV) | Layer 11D opt-in live smoke |
 
-## 10. Reference data on a new environment
+## 10. Reference data: trusted USDA ingestion (Layer 12B.1)
 
-Foods, Food servings and nutrients, Products, label versions and barcodes are global reference data. Only a trusted ingestion workflow may write them, and none exists yet. The nutrient vocabulary is the one exception: it is seeded by a migration. So a new project has **no searchable Foods or Products**: mobile search shows "No foods found…", and a barcode scan finds nothing (or only an unconfirmed external candidate, if providers are configured).
+Foods, Food servings and nutrients, Products, label versions and barcodes are global reference data. No client can write them; the nutrient vocabulary is the one exception, seeded by a migration. A new project therefore has **no searchable Foods or Products** until trusted ingestion runs. Never insert reference rows by hand in the dashboard, and never copy the API test fixtures into a real project.
 
-Do not insert Foods or Products by hand in the dashboard, and do not copy the API test fixtures into a real project. Making DEV searchable needs an approved, reviewed ingestion path (source dataset, licence, provenance, service-role execution outside the app). That is a separate decision.
+### 10.1 Source and licence
+
+- **Source:** USDA FoodData Central, **SR Legacy** dataset (generic foods, final release April 2018), from the official download page: https://fdc.nal.usda.gov/download-datasets.
+- **Licence:** public domain, published under **CC0 1.0 Universal**. No permission is needed. USDA asks that FoodData Central be cited as the source: "U.S. Department of Agriculture, Agricultural Research Service. FoodData Central, 2019. fdc.nal.usda.gov."
+- **Storage:** these terms are USDA's own. FatSecret and Open Food Facts storage rules do not apply.
+- **Provenance:** every ingested Food stores its source in `food_source_record`. Each record holds:
+  - the system (`usda_fdc`) and dataset (`sr_legacy`);
+  - the FDC ID and the SR NDB number;
+  - the release (the downloaded file name);
+  - the USDA description;
+  - the licence (`CC0-1.0`);
+  - a SHA-256 of the ingested content.
+- **Product boundary:** USDA *Branded* records are not ingested as generic Foods. The parser accepts only `dataType: "SR Legacy"`.
+
+### 10.2 What is mapped
+
+- **Food:**
+  - `canonical_name` is `usda-fdc:<FDC ID>`, an internal key that is never shown;
+  - the category is the USDA food category;
+  - `source` is `trusted_database`;
+  - **no density** (USDA SR states none, and none is assumed).
+- **Alias:** the USDA description, locale `en`, primary. There are no generated or AI aliases; Arabic comes later.
+- **Nutrients:** only the 21 pinned USDA nutrients in `api/src/ingestion/usda/nutrientMap.ts`.
+  - Each one matches by FDC nutrient id, SR number **and** unit, per 100 g.
+  - Energy is USDA's stated kcal and is never derived.
+  - A value USDA states as 0 is a known zero; a value it does not state is unavailable.
+  - Some values are left unmapped rather than approximated: kJ, IU values, phylloquinone-only vitamin K and total folate.
+  - Recorded decisions: carbohydrate = "by difference"; vitamin A = RAE; vitamin D = D2+D3 in mcg; vitamin E = alpha-tocopherol; folate = DFE; niacin = preformed niacin.
+- **Servings:** only USDA portions with a stated gram weight. The description is USDA's own wording (e.g. "1 large"), and the quantity is USDA's gram weight. Nothing is estimated.
+
+### 10.3 Refresh and history policy
+
+- **Unchanged records.** Re-running the same selection writes nothing.
+- **Changed records.** If a source record's content hash changed, the whole run **stops for review**; nothing is overwritten.
+- **Immutable provenance.** `food_source_record` rows cannot be updated.
+- **History is safe.** Logged meals keep their own nutrition snapshots (Layer 7A), so reference data never changes history.
+- **Future updates.** Changing existing reference values needs a separately reviewed refresh layer.
+
+### 10.4 The DEV bootstrap selection
+
+`api/src/ingestion/usda/dev-bootstrap.manifest.json` lists **179 generic SR Legacy foods** by NDB number and exact USDA description. They cover eggs, poultry, beef, lamb, pork, fish and shellfish, grains, breads, potatoes, legumes, vegetables, fruits, dairy, nuts and seeds, oils and sweeteners. The command refuses to run if any listed record is missing from the file, or if its description differs.
+
+### 10.5 Running it (operator only)
+
+The command is `npm run ingest:usda` in `api/`. It is not an API endpoint, and it is not in the production image. It connects with the database connection string from your own shell (`INGEST_DATABASE_URL`, using the database password). It never uses a service-role key and never runs in the app.
+
+```bash
+cd api
+read -rs "INGEST_DATABASE_URL?Connection string (hidden): "; export INGEST_DATABASE_URL; echo
+npm run ingest:usda -- --file <path>/FoodData_Central_sr_legacy_food_json_<date>.json \
+  --release FoodData_Central_sr_legacy_food_json_<date> --project-ref <ref>          # dry run (default)
+npm run ingest:usda -- ... --apply                                                    # writes, one transaction
+unset INGEST_DATABASE_URL
+```
+
+Safety checks:
+
+- **Wrong project.** The connection string must belong to `--project-ref`, so a run cannot reach another project.
+- **Dry run first.** Without `--apply`, every check and write runs and is then rolled back.
+- **TLS.** TLS certificates are always verified. Pass `--ca-file` with Supabase's CA certificate if your system trust store does not cover it.
+- **Exit codes.** `0` means done; `2` means stopped for review (changed or conflicting records); `1` means invalid input.

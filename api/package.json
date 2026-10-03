@@ -14,7 +14,8 @@
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:live": "LIVE_PROVIDER_SMOKE=1 vitest run tests/live",
-    "test:live-env": "LIVE_ENV_SMOKE=1 vitest run tests/live/liveEnvironment.smoke.test.ts"
+    "test:live-env": "LIVE_ENV_SMOKE=1 vitest run tests/live/liveEnvironment.smoke.test.ts",
+    "ingest:usda": "tsx src/ingestion/usda/cli.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",
