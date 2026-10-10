@@ -91,9 +91,10 @@ async function main(): Promise<number> {
     connectionString: databaseUrl,
     ssl: target.local ? false : { rejectUnauthorized: true, ...(args.caFile ? { ca: readFileSync(args.caFile, 'utf8') } : {}) },
   });
+  console.log(`connecting to ${target.host} …`);
   await client.connect();
   try {
-    const result = await applyPlan(client, plan, { release: args.release, dryRun: !args.apply });
+    const result = await applyPlan(client, plan, { release: args.release, dryRun: !args.apply }, (m) => console.log(m));
     console.log(summarize(plan, result));
     return 0;
   } catch (error) {
