@@ -108,7 +108,7 @@ describe('committed DEV bootstrap manifest', () => {
     expect(m.foods.length).toBeLessThanOrEqual(300);
     expect(new Set(m.foods.map((f) => f.ndb_number)).size).toBe(m.foods.length);
     // SR brand names are written in capitals (e.g. "KRAFT"); none may be selected
-    for (const f of m.foods) expect(f.description, f.description).not.toMatch(/\b[A-Z]{3,}\b/);
+    for (const f of m.foods) expect(f.description.replace(/\bUSDA's\b/g, ''), f.description).not.toMatch(/\b[A-Z]{3,}\b/);
   });
 });
 

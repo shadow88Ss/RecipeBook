@@ -44,11 +44,11 @@
   },
   {
    "ndb_number": "05219",
-   "description": "Turkey, breast, from whole bird, meat only, raw"
+   "description": "Turkey, whole, breast, meat only, raw"
   },
   {
    "ndb_number": "05220",
-   "description": "Turkey, breast, from whole bird, meat only, roasted"
+   "description": "Turkey, whole, breast, meat only, cooked, roasted"
   },
   {
    "ndb_number": "05711",
@@ -64,7 +64,7 @@
   },
   {
    "ndb_number": "23567",
-   "description": "Beef, ground, 85% lean meat / 15% fat, raw"
+   "description": "Beef, ground, 85% lean meat / 15% fat, raw (Includes foods for USDA's Food Distribution Program)"
   },
   {
    "ndb_number": "23570",
@@ -120,7 +120,7 @@
   },
   {
    "ndb_number": "15121",
-   "description": "Fish, tuna, light, canned in water, drained solids"
+   "description": "Fish, tuna, light, canned in water, drained solids (Includes foods for USDA's Food Distribution Program)"
   },
   {
    "ndb_number": "15083",
@@ -132,11 +132,11 @@
   },
   {
    "ndb_number": "15270",
-   "description": "Crustaceans, shrimp, raw (not previously frozen)"
+   "description": "Crustaceans, shrimp, raw"
   },
   {
    "ndb_number": "15271",
-   "description": "Crustaceans, shrimp, cooked (not previously frozen)"
+   "description": "Crustaceans, shrimp, cooked"
   },
   {
    "ndb_number": "15164",
@@ -164,11 +164,11 @@
   },
   {
    "ndb_number": "20036",
-   "description": "Rice, brown, long-grain, raw"
+   "description": "Rice, brown, long-grain, raw (Includes foods for USDA's Food Distribution Program)"
   },
   {
    "ndb_number": "20037",
-   "description": "Rice, brown, long-grain, cooked"
+   "description": "Rice, brown, long-grain, cooked (Includes foods for USDA's Food Distribution Program)"
   },
   {
    "ndb_number": "20035",
@@ -188,7 +188,7 @@
   },
   {
    "ndb_number": "20038",
-   "description": "Oats"
+   "description": "Oats (Includes foods for USDA's Food Distribution Program)"
   },
   {
    "ndb_number": "20120",
@@ -276,7 +276,7 @@
   },
   {
    "ndb_number": "11507",
-   "description": "Sweet potato, raw, unprepared"
+   "description": "Sweet potato, raw, unprepared (Includes foods for USDA's Food Distribution Program)"
   },
   {
    "ndb_number": "11508",
@@ -436,7 +436,7 @@
   },
   {
    "ndb_number": "09003",
-   "description": "Apples, raw, with skin"
+   "description": "Apples, raw, with skin (Includes foods for USDA's Food Distribution Program)"
   },
   {
    "ndb_number": "09040",
@@ -528,11 +528,11 @@
   },
   {
    "ndb_number": "09298",
-   "description": "Raisins, seedless"
+   "description": "Raisins, dark, seedless (Includes foods for USDA's Food Distribution Program)"
   },
   {
    "ndb_number": "09206",
-   "description": "Orange juice, raw"
+   "description": "Orange juice, raw (Includes foods for USDA's Food Distribution Program)"
   },
   {
    "ndb_number": "09016",
@@ -556,19 +556,19 @@
   },
   {
    "ndb_number": "01116",
-   "description": "Yogurt, plain, whole milk, 8 grams protein per 8 ounce"
+   "description": "Yogurt, plain, whole milk"
   },
   {
    "ndb_number": "01117",
-   "description": "Yogurt, plain, low fat, 12 grams protein per 8 ounce"
+   "description": "Yogurt, plain, low fat"
   },
   {
    "ndb_number": "01118",
-   "description": "Yogurt, plain, skim milk, 13 grams protein per 8 ounce"
+   "description": "Yogurt, plain, skim milk"
   },
   {
    "ndb_number": "01256",
-   "description": "Yogurt, Greek, plain, nonfat"
+   "description": "Yogurt, Greek, plain, nonfat (Includes foods for USDA's Food Distribution Program)"
   },
   {
    "ndb_number": "01287",
@@ -580,7 +580,7 @@
   },
   {
    "ndb_number": "01009",
-   "description": "Cheese, cheddar"
+   "description": "Cheese, cheddar (Includes foods for USDA's Food Distribution Program)"
   },
   {
    "ndb_number": "01019",
@@ -680,7 +680,7 @@
   },
   {
    "ndb_number": "16098",
-   "description": "Peanut butter, smooth style, with salt"
+   "description": "Peanut butter, smooth style, with salt (Includes foods for USDA's Food Distribution Program)"
   },
   {
    "ndb_number": "16398",
