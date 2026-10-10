@@ -128,14 +128,14 @@ describe('operator command guards', () => {
   });
 });
 
-describe('ingestion is not part of the API server', () => {
-  it('no server module imports src/ingestion (operator-only code)', async () => {
+describe('ingestion and operator commands are not part of the API server', () => {
+  it('no server module imports src/ingestion or src/operator (operator-only code)', async () => {
     const { readdirSync, statSync } = await import('node:fs');
     const root = path.resolve(__dirname, '../../src');
     const walk = (dir: string): string[] => readdirSync(dir).flatMap((n) => (statSync(path.join(dir, n)).isDirectory() ? walk(path.join(dir, n)) : [path.join(dir, n)]));
     const offenders = walk(root)
-      .filter((p) => p.endsWith('.ts') && !p.includes(`${path.sep}ingestion${path.sep}`))
-      .filter((p) => /from ['"][./]*ingestion\//.test(readFileSync(p, 'utf8')));
+      .filter((p) => p.endsWith('.ts') && !p.includes(`${path.sep}ingestion${path.sep}`) && !p.includes(`${path.sep}operator${path.sep}`))
+      .filter((p) => /from ['"][./]*(ingestion|operator)\//.test(readFileSync(p, 'utf8')));
     expect(offenders).toEqual([]);
   });
 });
