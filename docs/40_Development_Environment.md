@@ -271,7 +271,7 @@ Expo Go covers the alpha. For the barcode camera (12B) and later native health i
 
 Update this table when a live run happens: record the date, and the device and OS for phone tests.
 
-Last live run: 2026-10-01/02 on DEV project `psundpxqgiknxnjudmxv` (Singapore), with the API on Render (Starter, Singapore, commit `d9ab3b7`).
+Last live runs: 2026-10-01/02 and 2026-10-10 on DEV project `psundpxqgiknxnjudmxv` (Singapore), with the API on Render (Starter, Singapore, commit `d9ab3b7`).
 
 | Area | Status | Evidence |
 |---|---|---|
@@ -282,12 +282,13 @@ Last live run: 2026-10-01/02 on DEV project `psundpxqgiknxnjudmxv` (Singapore), 
 | Supabase Auth (sign-in, refresh, sign-out revocation) | LIVE VERIFIED (API/SDK) | same run |
 | Profiles, Daily Tracker, Progress APIs | LIVE VERIFIED (read paths) | same run (empty-day values null, no combined score) |
 | API deployment `/health`, unauthenticated `401` | LIVE VERIFIED | browser checks against the Render URL |
-| Physical iPhone (iPhone 16 Pro, Expo Go SDK 57) | PARTIAL | app launched to the sign-in screen; §7 items 2–10 not yet reported |
+| Physical iPhone (iPhone 16 Pro, Expo Go SDK 57) | PARTIAL | sign-in, Today, food logging (12B) verified 2026-10-10; §7 items 5–10 not yet reported |
 | Physical Android | NOT TESTED | §7 checklist |
-| Mobile food/product search, preview, logging (12B) | MOCK VERIFIED + LOCAL REAL-API CONTRACT CHECK | mobile tests; mobile request builders and response schemas run once against the real API on the local Postgres/RLS harness with test fixtures |
-| Mobile barcode camera (12B) | NOT TESTED on a device | camera is replaced by a stand-in in tests; lookup contract checked locally |
-| Trusted USDA ingestion (12B.1) | LOCAL VERIFIED | tests; full 179-food selection dry-run/applied/re-run locally with SR28-derived values in the SR Legacy shape (§10) |
-| Reference Foods on DEV | NOT LOADED YET | load with §10.5 after migration 47 is applied |
+| Mobile Food search, server preview, logging, Today refresh (12B) | LIVE VERIFIED (physical iPhone, 2026-10-10) | egg, rice, cottage cheese logged as User A; Today showed 3 meals, values Complete |
+| Mobile Product logging (12B) | NOT TESTED live | no Product reference data on DEV yet (mock + local real-API only) |
+| Mobile barcode camera (12B) | LIVE VERIFIED (physical iPhone, 2026-10-10) | real barcode read and looked up; "not found" as expected (no Products, no providers on DEV) |
+| Trusted USDA ingestion (12B.1) | LIVE VERIFIED | official SR Legacy 2018-04 file: DEV dry run, apply (179 foods, 596 servings, 3,724 values, 179 provenance), re-run unchanged; TLS verified with Supabase CA |
+| Reference Foods on DEV | LOADED (179, USDA SR Legacy) | migration 47 applied; A–O re-verified after 47 |
 | Reference Products on DEV | NONE | no Product ingestion yet |
 | Development build (EAS) | NOT TESTED | §8 |
 | FatSecret / Open Food Facts | NOT TESTED (not configured on DEV) | Layer 11D opt-in live smoke |
@@ -355,5 +356,5 @@ Safety checks:
 
 - **Wrong project.** The connection string must belong to `--project-ref`, so a run cannot reach another project.
 - **Dry run first.** Without `--apply`, every check and write runs and is then rolled back.
-- **TLS.** TLS certificates are always verified. Pass `--ca-file` with Supabase's CA certificate if your system trust store does not cover it.
+- **TLS.** TLS certificates are always verified. Supabase's pooler certificate is signed by Supabase's own CA, which macOS does not trust by default. Download it from Project Settings → Database → SSL Configuration (`prod-ca-2021.crt`) and pass it with `--ca-file`.
 - **Exit codes.** `0` means done; `2` means stopped for review (changed or conflicting records); `1` means invalid input.
