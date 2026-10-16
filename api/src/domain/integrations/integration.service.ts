@@ -14,12 +14,18 @@
 // attached/configured, never the reference name. Health/test results
 // are mapped to the internal failure model — raw provider errors never
 // reach a response or a log.
+//
+// Private settings (migration 48): operator contact details an adapter needs
+// (e.g. the Open Food Facts User-Agent contact) are not configuration. The
+// adapter declares them, the API resolves them from its own environment, the
+// admin API refuses them in `configuration`, and DTOs show only whether each
+// is configured.
 
 import { AppError } from '../../lib/errors';
 import type { ScopedDbClient, ScopedDbFactory } from '../../lib/scopedDb';
 import type { AuthContext } from '../../types/express';
-import type { AdapterDefinition, AdapterRegistry } from './adapters';
-import { callWithTimeout, createAdapterContext, credentialConfigured } from './execution';
+import { privateConfigurationPaths, publicConfiguration, type AdapterDefinition, type AdapterRegistry } from './adapters';
+import { callWithTimeout, createAdapterContext, credentialConfigured, privateSettingsConfigured, privateSettingStatus } from './execution';
 import {
   credentialRequired,
   FAMILY_CAPABILITIES,
@@ -165,11 +171,18 @@ export class IntegrationService {
     const definition = this.options.registry.get(provider.provider_key);
     const issues: Array<{ path: string; message: string; reason?: string }> = [];
 
-    let configuration = provider.configuration ?? {};
+    let configuration = publicConfiguration(definition, provider.configuration);
     if (input.configuration !== undefined) {
       const secretKeys = secretLikeKeys(input.configuration);
+      const privatePaths = privateConfigurationPaths(input.configuration, Object.keys(definition?.privateSettings ?? {}));
       if (secretKeys.length) {
         issues.push({ path: 'configuration', message: `Secrets are not configuration; use secret_reference (${secretKeys.join(', ')}).`, reason: 'secret_in_configuration' });
+      } else if (privatePaths.length) {
+        issues.push({
+          path: 'configuration',
+          message: `Private settings are not configuration; they are set in the API's server environment (${privatePaths.join(', ')}).`,
+          reason: 'private_setting_in_configuration',
+        });
       } else if (!definition) {
         issues.push({ path: 'configuration', message: 'This provider has no adapter, so no configuration schema to validate against.', reason: 'no_configuration_schema' });
       } else {
@@ -209,6 +222,7 @@ export class IntegrationService {
 
     const change: Record<string, unknown> = {};
     for (const field of ['display_name', 'enabled', 'environment', 'capabilities'] as const) if (input[field] !== undefined) change[field] = input[field];
+    // A configuration write also drops any private setting a pre-48 row still carried.
     if (input.configuration !== undefined) change.configuration = configuration;
     if (input.secret_reference !== undefined) change.secret_reference = input.secret_reference;
     await callWrite(() => db.rpc('admin_update_external_provider', { p_provider_key: provider.provider_key, p_change: change }));
@@ -236,7 +250,10 @@ export class IntegrationService {
     if (credentialRequired(provider.credential_model) && !credentialConfigured(definition, provider.secret_reference !== null, this.options.secrets)) {
       throw AppError.conflict('The platform credential is not configured.', { reason: 'credential_not_configured' });
     }
-    const parsed = definition.configSchema.safeParse(provider.configuration ?? {});
+    if (!privateSettingsConfigured(definition, this.options.secrets)) {
+      throw AppError.conflict("A private setting is not configured in the API's server environment.", { reason: 'private_setting_not_configured' });
+    }
+    const parsed = definition.configSchema.safeParse(publicConfiguration(definition, provider.configuration));
     if (!parsed.success) throw AppError.conflict('The stored configuration is not valid for this adapter.', { reason: 'invalid_configuration' });
 
     const test = definition.testConnection.bind(definition);
@@ -315,7 +332,8 @@ export class IntegrationService {
     if (!definition) blockers.push('adapter_not_available');
     else {
       if (definition.adapter.family !== provider.provider_family) blockers.push('adapter_family_mismatch');
-      if (!definition.configSchema.safeParse(configuration ?? {}).success) blockers.push('invalid_configuration');
+      if (!definition.configSchema.safeParse(publicConfiguration(definition, configuration)).success) blockers.push('invalid_configuration');
+      if (!privateSettingsConfigured(definition, this.options.secrets)) blockers.push('private_setting_not_configured');
       if (![...capabilities].some((c) => definition.capabilities.includes(c))) blockers.push('no_supported_capability_enabled');
     }
     if (credentialRequired(provider.credential_model)) {
@@ -368,7 +386,10 @@ export class IntegrationService {
         available: adapterMatches,
         test_connection_supported: adapterMatches && typeof definition?.testConnection === 'function',
       },
-      configuration: p.configuration ?? {},
+      // Non-sensitive operational configuration only; private settings appear
+      // as status flags, never as values or environment names.
+      configuration: publicConfiguration(definition, p.configuration),
+      private_settings: privateSettingStatus(definition, this.options.secrets),
       wearable_provider: p.wearable_provider,
       health: this.healthDto(p).health,
       created_at: p.created_at,

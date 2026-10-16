@@ -85,7 +85,7 @@ union all select 'O default_privileges_to_anon_or_authenticated', coalesce(strin
 order by 1;
 ```
 
-Expected (identical for a clean local build and for the live project). The current values are for all 47 migrations. Migration 47 (`food_source_record`, Layer 12B.1) adds one table, one policy and one trigger, plus SELECT for `authenticated`. The "after 46" column is kept for history.
+Expected (identical for a clean local build and for the live project). The current values are for all 47 migrations, and they are **unchanged by migration 48** (`private_provider_settings`), which adds only a check constraint and redefines a function with the same signature, security mode and grants (verify 48 with §11.3). Migration 47 (`food_source_record`, Layer 12B.1) adds one table, one policy and one trigger, plus SELECT for `authenticated`. The "after 46" column is kept for history.
 
 | Check | Expected (47 migrations) | After 46 |
 |---|---|---|
@@ -172,6 +172,7 @@ Environment settings on the host (server-side only):
 | `SUPABASE_JWT_VERIFICATION` | `jwks` (see §1.2) |
 | `SUPABASE_JWT_SECRET` | *secret*; only for the legacy modes; otherwise unset |
 | `LOG_LEVEL` | `info` |
+| `OPEN_FOOD_FACTS_CONTACT_EMAIL` | only when Open Food Facts is enabled: the User-Agent contact (private, not secret; §11). Never stored in the database |
 
 Never set a service-role key, the database password or a provider secret for this layer. FatSecret and Open Food Facts are not needed. The API stays up with providers unconfigured, and those routes answer `503`.
 
@@ -362,7 +363,7 @@ Safety checks:
 
 ## 11. Open Food Facts on DEV (Option A)
 
-Open Food Facts is the existing Layer 11D adapter, configured through the Layer 11C admin API. It provides barcode lookup only, plus candidate detail (`nutrition_lookup`). `product_search` stays disabled because Open Food Facts search is not implemented. There is no credential (`credential_model: none`), only an identifying User-Agent: `MyRecipeBook/1.0 (<contact email>)`.
+Open Food Facts is the existing Layer 11D adapter, configured through the Layer 11C admin API. It provides barcode lookup only, plus candidate detail (`nutrition_lookup`). `product_search` stays disabled because Open Food Facts search is not implemented. There is no credential (`credential_model: none`), only an identifying User-Agent: `MyRecipeBook/1.0 (<contact email>)`. Since migration 48 the contact is a **private setting**: the Render variable `OPEN_FOOD_FACTS_CONTACT_EMAIL`, resolved by the API itself, never stored configuration.
 
 **Results.** Every result is an `unconfirmed_external_candidate` with `loggable: false`. It carries Open Food Facts attribution and the ODbL/DbCL licence, and is held only in API memory. Nothing is written to Product, Barcode, ProductLabelVersion, ProductNutrient or ProductServing.
 
@@ -375,18 +376,43 @@ Open Food Facts is the existing Layer 11D adapter, configured through the Layer 
 cd api
 export OPS_EMAIL='<operator sign-in email>'
 read -rs "OPS_PASSWORD?App password (hidden): "; export OPS_PASSWORD
-export OFF_CONTACT_EMAIL='<contact address>'          # configure only
 npm run ops:off -- status    --project-ref <ref>
-npm run ops:off -- configure --project-ref <ref>      # enable, production host, User-Agent fields
+npm run ops:off -- configure --project-ref <ref>      # enable, production host, app name/version
 npm run ops:off -- test      --project-ref <ref>      # one real read, records health only
 npm run ops:off -- lookup 3017624010701 --project-ref <ref>   # consumer flow + persistence/exposure checks
 npm run ops:off -- disable   --project-ref <ref>      # rollback
-unset OPS_PASSWORD OPS_EMAIL OFF_CONTACT_EMAIL
+unset OPS_PASSWORD OPS_EMAIL
 ```
 
 ### 11.2 Known limits
 
-- **Contact email is not private.** It is stored as non-secret configuration. `enabled_provider_routes()` returns that configuration to any signed-in user, by Layer 11D design. Admin audit events record only changed field names, never values. Before real users, use a dedicated project mailbox. Changing it needs only `configure`, no code change.
+- **Contact email (closed by migration 48).** It was stored as configuration, and `enabled_provider_routes()` (callable by every signed-in user) returned it. It now lives only in the API's environment; see §11.3. Before real users, set the variable to a dedicated project mailbox (Render change and redeploy only).
 - **Coverage depends on Open Food Facts.** Products that Open Food Facts does not know still show as not found.
 - **Candidates cannot be logged yet.** Turning a candidate into a confirmed Product is a separate, unapproved step.
+
+### 11.3 Private provider settings (migration 48)
+
+**What changed.**
+- Adapters declare private settings (`privateSettings`, `env:` references). The API resolves them from its own environment at call time.
+- `enabled_provider_routes()` returns only `provider_key`, `priority`, `environment` and non-sensitive operational configuration (timeouts, cache, retries, rate limit, app name and version). It no longer returns `credential_attached`; the API derives that from the adapter's own declaration.
+- The admin API refuses private settings in `configuration` (reason `private_setting_in_configuration`): declared keys, contact-like keys, or e-mail-like values. Admin DTOs show `private_settings: [{ name, configured }]` only.
+- Enabling and testing are blocked while a setting is missing (`private_setting_not_configured`). An API without the setting never calls the provider.
+- The database refuses the same shapes with the constraint `external_provider_configuration_not_private`.
+
+**Safe order.** A new API runs on the old database too: it ignores a stored contact. The old API does not run on the new database.
+1. Set `OPEN_FOOD_FACTS_CONTACT_EMAIL` on Render.
+2. Deploy the API.
+3. Apply migration 48.
+
+**Verify (SQL editor, read-only):**
+
+```sql
+select
+  (select string_agg(p.parameter_name, ',' order by p.ordinal_position) from information_schema.parameters p
+     join information_schema.routines r on r.specific_name = p.specific_name
+    where r.routine_schema = 'public' and r.routine_name = 'enabled_provider_routes' and p.parameter_mode = 'OUT') as route_columns,
+  (select count(*) from pg_constraint where conname = 'external_provider_configuration_not_private') as private_guard,
+  (select count(*) from external_provider where configuration::text like '%@%' or configuration ? 'contact_email') as stored_private_values;
+-- expected: provider_key,priority,environment,configuration | 1 | 0
+```
 

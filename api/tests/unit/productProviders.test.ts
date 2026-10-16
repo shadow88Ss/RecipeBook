@@ -15,7 +15,7 @@ import { FakeProviderHttp, FS_ACCESS_TOKEN_PREFIX, FS_CLIENT_ID, FS_CLIENT_SECRE
 let http: FakeProviderHttp;
 let clock: number;
 const now = () => new Date(clock);
-const secrets = new EnvSecretResolver({ FATSECRET_CLIENT_ID: FS_CLIENT_ID, FATSECRET_CLIENT_SECRET: FS_CLIENT_SECRET });
+const secrets = new EnvSecretResolver({ FATSECRET_CLIENT_ID: FS_CLIENT_ID, FATSECRET_CLIENT_SECRET: FS_CLIENT_SECRET, OPEN_FOOD_FACTS_CONTACT_EMAIL: 'dev@myrecipebook.example' });
 
 function ctx(def: AdapterDefinition, config: Record<string, unknown> = {}, environment: 'production' | 'sandbox' = 'production') {
   return createAdapterContext({
@@ -234,14 +234,16 @@ describe('FatSecret adapter', () => {
 
 describe('Open Food Facts adapter', () => {
   const def = () => createOpenFoodFactsDefinition({ fetch: http.fetch, now });
-  const config = { contact_email: 'dev@myrecipebook.example' };
+  // The User-Agent contact is a private setting from the environment (migration 48).
+  const config = {};
 
   it('declares only implemented capabilities, no credential; identifies itself with the required User-Agent', async () => {
     const d = def();
     expect(d.capabilities).toEqual(['barcode_lookup', 'nutrition_lookup']);
     expect(d.credential).toBeUndefined();
     expect(ops(d).searchProducts).toBeUndefined(); // 10 searches/min/IP is not safe for consumer search
-    expect(d.configSchema.safeParse({}).success).toBe(false); // contact email is required
+    expect(d.privateSettings).toEqual({ contact_email: 'env:OPEN_FOOD_FACTS_CONTACT_EMAIL' });
+    expect(d.configSchema.safeParse({ contact_email: 'dev@myrecipebook.example' }).success).toBe(false); // never configuration
     expect(d.configSchema.safeParse({ ...config, product_reads_per_minute: 16 }).success).toBe(false);
     await ops(d).lookupBarcode?.(ctx(d, config), gtin('3017624010701'));
     const call = http.callsTo('off')[0];
@@ -250,6 +252,24 @@ describe('Open Food Facts adapter', () => {
     expect(call?.headers.authorization).toBeUndefined();
     await ops(d).lookupBarcode?.(ctx(d, config, 'sandbox'), gtin('3017624010701'));
     expect(http.callsTo('off')[1]?.url.startsWith('https://world.openfoodfacts.net/')).toBe(true);
+  });
+
+  it('never calls Open Food Facts without a valid environment contact', async () => {
+    for (const env of [{}, { OPEN_FOOD_FACTS_CONTACT_EMAIL: 'not-an-email' }]) {
+      const d = def();
+      const bare = createAdapterContext({
+        definition: d,
+        providerKey: d.provider_key,
+        environment: 'production',
+        configuration: d.configSchema.parse({}),
+        credentialAttached: false,
+        secrets: new EnvSecretResolver(env),
+        signal: new AbortController().signal,
+        requestId: null,
+      });
+      expect((await failureOf(ops(d).lookupBarcode?.(bare, gtin('3017624010701')) as Promise<unknown>)).code).toBe('authentication_failed');
+    }
+    expect(http.callsTo('off')).toEqual([]);
   });
 
   it('barcode lookup -> normalized candidate (H, 44 A-I)', async () => {
@@ -331,7 +351,7 @@ describe('provider disagreement is preserved, never merged (44 L)', () => {
     const fs = createFatSecretDefinition({ fetch: http.fetch, now });
     const off = createOpenFoodFactsDefinition({ fetch: http.fetch, now });
     const a = (await ops(fs).lookupBarcode?.(ctx(fs), gtin('3017624010701'))) as ExternalProductCandidate;
-    const b = (await ops(off).lookupBarcode?.(ctx(off, { contact_email: 'dev@myrecipebook.example' }), gtin('3017624010701'))) as ExternalProductCandidate;
+    const b = (await ops(off).lookupBarcode?.(ctx(off, {}), gtin('3017624010701'))) as ExternalProductCandidate;
     const diff = providerDisagreements([a, b]);
     expect(diff.map((d) => d.field)).toEqual(expect.arrayContaining(['brand_name', 'product_name', 'serving']));
     expect(diff.find((d) => d.field === 'brand_name')?.values).toEqual([

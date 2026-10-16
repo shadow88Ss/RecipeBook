@@ -307,14 +307,15 @@ describe('§31 extensibility: a new ProductDataProvider plugs in without core ch
     expect(route.configuration).toEqual({ api_version: 'v2', market: 'AE' });
     expect(JSON.stringify(plan)).not.toContain(SECRET_VALUE);
     const candidate = await (route.definition.adapter as ProductDataAdapter).lookupBarcode?.(
-      { provider_key: route.provider_key, environment: route.environment, configuration: route.configuration, timeoutMs: 1000, secret: async () => 'unused', signal: new AbortController().signal, requestId: null },
+      { provider_key: route.provider_key, environment: route.environment, configuration: route.configuration, timeoutMs: 1000, secret: async () => 'unused', privateSetting: () => 'unused', signal: new AbortController().signal, requestId: null },
       '04006381333931',
     );
     expect(candidate).toMatchObject({ external_product_id: 'ext-04006381333931', status: 'unconfirmed_external_candidate', loggable: false });
     expect(route.credential_attached).toBe(true);
     // what the database hands an ordinary caller: no reference name (Layer 11D)
+    // and no credential metadata at all (migration 48)
     const rows = await db.rpcRows<Record<string, unknown>>('enabled_provider_routes', { p_family: 'product_data', p_capability: 'barcode_lookup' });
-    expect(rows).toEqual([{ provider_key: 'example_product_provider', priority: 5, environment: 'sandbox', configuration: { api_version: 'v2', market: 'AE' }, credential_attached: true }]);
+    expect(rows).toEqual([{ provider_key: 'example_product_provider', priority: 5, environment: 'sandbox', configuration: { api_version: 'v2', market: 'AE' } }]);
   });
 });
 
@@ -622,7 +623,7 @@ describe('vocabulary and API shape for a future Admin UI', () => {
     const res = await admin().get(BASE);
     const item = res.body.items.find((p: { provider_key: string }) => p.provider_key === 'example_product_provider');
     expect(Object.keys(item).sort()).toEqual(
-      ['adapter', 'capabilities', 'configuration', 'connection_model', 'created_at', 'credential', 'credential_model', 'deployment_environment', 'display_name', 'enabled', 'environment', 'health', 'provider_family', 'provider_key', 'updated_at', 'wearable_provider'].sort(),
+      ['adapter', 'capabilities', 'configuration', 'connection_model', 'created_at', 'credential', 'credential_model', 'deployment_environment', 'display_name', 'enabled', 'environment', 'health', 'private_settings', 'provider_family', 'provider_key', 'updated_at', 'wearable_provider'].sort(),
     );
     expect(item.capabilities[0]).toEqual({ capability: 'barcode_lookup', enabled: true, priority: 1, supported_by_adapter: true });
     expect((await admin().get(`${BASE}/not_registered`)).status).toBe(404);

@@ -12,7 +12,7 @@
 // Nothing here calls a provider; callers decide the fallback policy.
 
 import type { ScopedDbClient } from '../../lib/scopedDb';
-import { AdapterRegistry, type AdapterDefinition } from './adapters';
+import { AdapterRegistry, publicConfiguration, type AdapterDefinition } from './adapters';
 import { isFamilyCapability, type ProviderEnvironment, type ProviderFamily } from './integration.model';
 
 export interface ExternalRoute {
@@ -21,9 +21,10 @@ export interface ExternalRoute {
   priority: number;
   environment: ProviderEnvironment;
   configuration: unknown;
-  /** Whether a platform credential is attached to the registry row. The
-   * reference itself is never read here (Layer 11D): the adapter declares
-   * where its credential lives. */
+  /** Whether the adapter declares a platform credential. Nothing about the
+   * registry row's secret reference is read here (migration 48): an enabled
+   * row of a credentialed provider always has it attached (enable blockers),
+   * and the adapter declares where the credential lives. */
   credential_attached: boolean;
   definition: AdapterDefinition;
 }
@@ -41,12 +42,13 @@ export interface RoutingPlan {
   excluded: ExcludedRoute[];
 }
 
+/** What enabled_provider_routes() returns (migration 48): routing data and
+ * non-sensitive operational configuration only. */
 interface RouteRow {
   provider_key: string;
   priority: number;
   environment: ProviderEnvironment;
   configuration: unknown;
-  credential_attached: boolean;
 }
 
 export class ProviderRouter {
@@ -64,15 +66,15 @@ export class ProviderRouter {
       if (!definition) excluded.push({ provider_key: row.provider_key, reason: 'adapter_not_available' });
       else if (definition.adapter.family !== family) excluded.push({ provider_key: row.provider_key, reason: 'adapter_family_mismatch' });
       else if (!definition.capabilities.includes(capability)) excluded.push({ provider_key: row.provider_key, reason: 'capability_not_supported_by_adapter' });
-      else if (!definition.configSchema.safeParse(row.configuration ?? {}).success) excluded.push({ provider_key: row.provider_key, reason: 'invalid_configuration' });
+      else if (!definition.configSchema.safeParse(publicConfiguration(definition, row.configuration)).success) excluded.push({ provider_key: row.provider_key, reason: 'invalid_configuration' });
       else {
         routes.push({
           kind: 'external',
           provider_key: row.provider_key,
           priority: Number(row.priority),
           environment: row.environment,
-          configuration: definition.configSchema.parse(row.configuration ?? {}),
-          credential_attached: row.credential_attached === true,
+          configuration: definition.configSchema.parse(publicConfiguration(definition, row.configuration)),
+          credential_attached: definition.credential !== undefined,
           definition,
         });
       }

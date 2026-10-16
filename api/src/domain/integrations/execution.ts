@@ -35,6 +35,18 @@ export function credentialConfigured(definition: AdapterDefinition | undefined, 
   return secrets.isConfigured(credential.reference) && Object.values(credential.parts ?? {}).every((ref) => secrets.isConfigured(ref));
 }
 
+/** Every private setting the adapter declares resolves from the environment. */
+export function privateSettingsConfigured(definition: AdapterDefinition | undefined, secrets: SecretResolver): boolean {
+  return Object.values(definition?.privateSettings ?? {}).every((ref) => secrets.isConfigured(ref));
+}
+
+/** Per-setting status for admins: names and booleans only, never values or references. */
+export function privateSettingStatus(definition: AdapterDefinition | undefined, secrets: SecretResolver): Array<{ name: string; configured: boolean }> {
+  return Object.entries(definition?.privateSettings ?? {})
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([name, ref]) => ({ name, configured: secrets.isConfigured(ref) }));
+}
+
 export function createAdapterContext(args: {
   definition: AdapterDefinition;
   providerKey: string;
@@ -57,6 +69,12 @@ export function createAdapterContext(args: {
     secret: async (part?: string) => {
       const credential = args.definition.credential;
       const reference = !args.credentialAttached || !credential ? null : part === undefined ? credential.reference : credential.parts?.[part] ?? null;
+      const value = reference ? args.secrets.resolve(reference) : null;
+      if (value === null) throw new IntegrationFailure('authentication_failed');
+      return value;
+    },
+    privateSetting: (name: string) => {
+      const reference = args.definition.privateSettings?.[name];
       const value = reference ? args.secrets.resolve(reference) : null;
       if (value === null) throw new IntegrationFailure('authentication_failed');
       return value;

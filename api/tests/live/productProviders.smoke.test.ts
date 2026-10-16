@@ -1,7 +1,7 @@
 // Layer 11D — OPT-IN live smoke tests against the real providers. Skipped
 // unless LIVE_PROVIDER_SMOKE=1. FatSecret additionally needs
 // FATSECRET_CLIENT_ID / FATSECRET_CLIENT_SECRET (and an allow-listed IP);
-// Open Food Facts needs OFF_CONTACT_EMAIL. Never part of the default suite:
+// Open Food Facts needs OPEN_FOOD_FACTS_CONTACT_EMAIL. Never part of the default suite:
 // passing the default suite is mock-verified behaviour, not live verification.
 
 import { describe, expect, it } from 'vitest';
@@ -27,10 +27,10 @@ function ctx(def: AdapterDefinition, config: Record<string, unknown>) {
   });
 }
 
-describe.skipIf(!live || !process.env.OFF_CONTACT_EMAIL)('live: Open Food Facts', () => {
+describe.skipIf(!live || !process.env.OPEN_FOOD_FACTS_CONTACT_EMAIL)('live: Open Food Facts', () => {
   it('reads one known product into a candidate', async () => {
     const def = createOpenFoodFactsDefinition(deps);
-    const c = await (def.adapter as ProductDataAdapter).lookupBarcode?.(ctx(def, { contact_email: process.env.OFF_CONTACT_EMAIL, cache_ttl_seconds: 0 }), '03017624010701');
+    const c = await (def.adapter as ProductDataAdapter).lookupBarcode?.(ctx(def, { cache_ttl_seconds: 0 }), '03017624010701');
     expect(c).toMatchObject({ provider_key: 'open_food_facts', external_product_id: '3017624010701', status: 'unconfirmed_external_candidate' });
   });
 });

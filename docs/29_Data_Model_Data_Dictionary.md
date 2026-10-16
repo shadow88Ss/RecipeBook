@@ -768,8 +768,17 @@ Migration `20261013120000_external_product_providers.sql` (additive). **No new t
 
 **Adapter configuration** (jsonb `configuration`, strict per adapter; no URL or host is configurable):
 - *fatsecret* — `region` (ISO alpha-2, default `US`) · `language?` · `scopes` ⊆ {basic, premier, barcode} (default basic+barcode) · `request_timeout_ms` 500–10000 (4000) · `cache_ttl_seconds` 0–86400 (3600) · `max_retries` 0–1 (0) · `search_max_results` 1–50 (20).
-- *open_food_facts* — `contact_email` (required; User-Agent policy) · `app_name` (MyRecipeBook) · `app_version` (1.0) · `request_timeout_ms` 500–10000 (4000) · `cache_ttl_seconds` 0–86400 (3600) · `max_retries` 0–1 (0) · `product_reads_per_minute` 1–15 (10; documented limit 15/min/IP) · `health_check_barcode`.
+- *open_food_facts* — (the User-Agent contact is a private setting since migration 48: `OPEN_FOOD_FACTS_CONTACT_EMAIL` in the API environment, never configuration) · `app_name` (MyRecipeBook) · `app_version` (1.0) · `request_timeout_ms` 500–10000 (4000) · `cache_ttl_seconds` 0–86400 (3600) · `max_retries` 0–1 (0) · `product_reads_per_minute` 1–15 (10; documented limit 15/min/IP) · `health_check_barcode`.
 
 **Nutrient field tables** (provider field → Layer 5C key; everything else `unmapped` with a reason):
 - *FatSecret* (per serving): calories kcal → energy · protein, fat, fiber g → same · carbohydrate g → carbohydrate for the US database only (`carbohydrate_definition_unverified` elsewhere) · sodium, potassium mg → same · saturated/poly/mono/trans fat, cholesterol, sugar, added_sugars → `no_canonical_key` · vitamin_a, vitamin_c, vitamin_d, calcium, iron → `unit_unverified`.
 - *Open Food Facts* (`*_100g` per 100 g/ml by product quantity unit; `*_serving` per serving): energy-kcal → energy · energy-kj / energy → `kj_only_no_approved_conversion` · proteins, fat, fiber → same · carbohydrates → `carbohydrate_definition_unverified` · sodium → `may_be_derived_from_salt` · sugars, saturated-fat, salt → `no_canonical_key` · potassium, calcium, iron, magnesium, zinc, vitamin-c, vitamin-b1/b2/b6/b12, vitamin-k (g → mg/mcg exactly) · vitamin-a, vitamin-d, vitamin-e, vitamin-pp, folates → `measure_requires_mapping_review`.
+
+## 43. Private provider settings (Option A hardening, migration 48)
+
+Migration `20261016120000_private_provider_settings.sql` (additive). **No new table or column.**
+
+- **Data.** `contact_email` is removed from every stored `external_provider.configuration` (not copied anywhere). The change is audited by the existing trigger as `external_provider_configuration_changed` (field names only).
+- **Constraint `external_provider_configuration_not_private`.** Configuration may not contain a key matching `e-?mail|contact|phone` (case-insensitive) or an e-mail-like string value, at any depth.
+- **`enabled_provider_routes(p_family, p_capability)`** is replaced (drop + create; same SECURITY DEFINER, `authenticated` only). It returns `provider_key text, priority int, environment provider_environment, configuration jsonb`. `credential_attached` is removed.
+- **Private settings.** These are declared per adapter in code (Open Food Facts: `contact_email` → `env:OPEN_FOOD_FACTS_CONTACT_EMAIL`), resolved by the API from its environment, and never stored. **PII:** an operator contact address only, outside the database.

@@ -30,6 +30,10 @@ export interface AdapterContext<C = unknown> {
    * `client_id`), from the adapter's declared references. Throws
    * authentication_failed when it is not configured. */
   secret(part?: string): Promise<string>;
+  /** Resolves one of the adapter's declared private settings (e.g. a
+   * User-Agent contact) from the server's own environment. Throws
+   * authentication_failed when it is not configured. */
+  privateSetting(name: string): string;
   timeoutMs: number;
   /** Aborted when the call times out; adapters pass it to every request. */
   signal: AbortSignal;
@@ -138,8 +142,43 @@ export interface AdapterDefinition<C = unknown> {
    * users can call. `parts` names companion values (e.g. an OAuth client id).
    */
   credential?: { reference: string; parts?: Readonly<Record<string, string>> };
+  /**
+   * Private, non-secret settings (e.g. the operator contact a provider's
+   * User-Agent policy requires), by name -> `env:NAME` reference. They are
+   * never stored in the registry row: enabled_provider_routes() is callable
+   * by every signed-in user, so anything stored there is readable by them
+   * (Option A hardening, migration 48). The API process resolves them from
+   * its own environment at call time; every declared setting is required.
+   */
+  privateSettings?: Readonly<Record<string, string>>;
   /** Cheap authenticated probe, if the provider has one. */
   testConnection?(ctx: AdapterContext<C>): Promise<void>;
+}
+
+/** Key or value shapes that never belong in stored configuration: operator
+ * contact details are private settings, not configuration. */
+const PRIVATE_KEY_PATTERN = /e-?mail|contact|phone/i;
+const EMAIL_VALUE_PATTERN = /[^@\s]+@[^@\s]+\.[^@\s]+/;
+
+/** Paths in submitted configuration that are private settings: keys an
+ * adapter declares private, contact-like key names, or e-mail-like values. */
+export function privateConfigurationPaths(value: unknown, declared: readonly string[] = [], path = ''): string[] {
+  if (typeof value === 'string') return EMAIL_VALUE_PATTERN.test(value) ? [path || '(value)'] : [];
+  if (Array.isArray(value)) return value.flatMap((v, i) => privateConfigurationPaths(v, declared, `${path}[${i}]`));
+  if (!value || typeof value !== 'object') return [];
+  return Object.entries(value).flatMap(([k, v]) => {
+    const here = path ? `${path}.${k}` : k;
+    if (declared.includes(k) || PRIVATE_KEY_PATTERN.test(k)) return [here];
+    return privateConfigurationPaths(v, declared, here);
+  });
+}
+
+/** The stored configuration without the adapter's private settings. Rows
+ * written before migration 48 may still carry one; it is ignored, never used. */
+export function publicConfiguration(definition: AdapterDefinition | undefined, configuration: unknown): Record<string, unknown> {
+  const source = configuration && typeof configuration === 'object' && !Array.isArray(configuration) ? (configuration as Record<string, unknown>) : {};
+  const declared = Object.keys(definition?.privateSettings ?? {});
+  return Object.fromEntries(Object.entries(source).filter(([k]) => !declared.includes(k)));
 }
 
 /** A source inside MyRecipeBook (e.g. the Layer 11A Product catalog). It is

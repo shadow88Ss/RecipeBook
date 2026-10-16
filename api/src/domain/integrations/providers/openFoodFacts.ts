@@ -2,7 +2,10 @@
 //
 // Reads need no credential, only an identifying User-Agent
 // "AppName/Version (ContactEmail)" (openfoodfacts.github.io/openfoodfacts-
-// server/api). Documented limits are 15 product reads/min/IP and 10
+// server/api). The contact is a private setting resolved from the API's
+// environment (OPEN_FOOD_FACTS_CONTACT_EMAIL), never stored configuration:
+// the routing function that returns configuration is callable by every
+// signed-in user (migration 48). Documented limits are 15 product reads/min/IP and 10
 // searches/min/IP, with IP bans on abuse; this adapter enforces a local
 // per-process budget (<= 15/min) before calling and does not implement
 // search at all — 10/min/IP is not safe for consumer search traffic.
@@ -61,8 +64,6 @@ export const OPEN_FOOD_FACTS_STORAGE_POLICY: ProviderStoragePolicy = {
 export const openFoodFactsConfigSchema = z.strictObject({
   app_name: z.string().regex(/^[A-Za-z0-9._-]{1,60}$/).default('MyRecipeBook'),
   app_version: z.string().regex(/^[0-9A-Za-z._-]{1,20}$/).default('1.0'),
-  /** Required by the Open Food Facts User-Agent policy. */
-  contact_email: z.email(),
   request_timeout_ms: z.number().int().min(500).max(10_000).default(4000),
   cache_ttl_seconds: z.number().int().min(0).max(86_400).default(3600),
   max_retries: z.number().int().min(0).max(1).default(0),
@@ -70,6 +71,10 @@ export const openFoodFactsConfigSchema = z.strictObject({
   health_check_barcode: z.string().regex(/^[0-9]{8,14}$/).default('3017624010701'),
 });
 export type OpenFoodFactsConfig = z.infer<typeof openFoodFactsConfigSchema>;
+
+/** Private settings, from the API's own environment. */
+export const OPEN_FOOD_FACTS_PRIVATE_SETTINGS = { contact_email: 'env:OPEN_FOOD_FACTS_CONTACT_EMAIL' } as const;
+const contactSchema = z.email();
 
 const PRODUCT_FIELDS = [
   'code',
@@ -143,10 +148,13 @@ export function createOpenFoodFactsDefinition(deps: { fetch: Transport; now: () 
   const limiter = new MinuteRateLimiter(deps.now);
 
   async function read(ctx: AdapterContext<OpenFoodFactsConfig>, code: string): Promise<Record<string, unknown> | null> {
+    // Required by the Open Food Facts User-Agent policy: never call without it.
+    const contact = contactSchema.safeParse(ctx.privateSetting('contact_email'));
+    if (!contact.success) throw new IntegrationFailure('authentication_failed');
     limiter.take(ctx.configuration.product_reads_per_minute);
     const host = OPEN_FOOD_FACTS_HOSTS[ctx.environment];
     const headers: Record<string, string> = {
-      'User-Agent': `${ctx.configuration.app_name}/${ctx.configuration.app_version} (${ctx.configuration.contact_email})`,
+      'User-Agent': `${ctx.configuration.app_name}/${ctx.configuration.app_version} (${contact.data})`,
       Accept: 'application/json',
     };
     if (ctx.environment === 'sandbox') headers.Authorization = `Basic ${Buffer.from('off:off').toString('base64')}`;
@@ -252,6 +260,7 @@ export function createOpenFoodFactsDefinition(deps: { fetch: Transport; now: () 
     provider_key: OPEN_FOOD_FACTS_PROVIDER_KEY,
     capabilities: ['barcode_lookup', 'nutrition_lookup'],
     configSchema: openFoodFactsConfigSchema,
+    privateSettings: OPEN_FOOD_FACTS_PRIVATE_SETTINGS,
     adapter,
     async testConnection(ctx) {
       await read(ctx, ctx.configuration.health_check_barcode);

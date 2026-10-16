@@ -5,17 +5,18 @@
 //   npm run ops:off -- <command> --project-ref <ref> [--env-file ../mobile/.env.local]
 //
 //   status             provider state as the admin API reports it
-//   configure          PATCH: User-Agent configuration, environment production,
+//   configure          PATCH: User-Agent app name/version, environment production,
 //                      barcode_lookup + nutrition_lookup on, product_search off,
-//                      enabled. Needs OFF_CONTACT_EMAIL.
+//                      enabled. The contact is NOT configuration (migration 48):
+//                      it is OPEN_FOOD_FACTS_CONTACT_EMAIL on the API server.
 //   test               admin connection test (one real Open Food Facts read)
-//   lookup <barcode>   consumer barcode lookup as the signed-in user, plus
-//                      persistence and exposure checks
+//   lookup <barcode>   consumer barcode lookup as the signed-in user (admin or
+//                      ordinary), plus persistence and exposure checks
 //   disable            PATCH enabled: false (rollback)
 //
 // Inputs: the API and Supabase URLs and the publishable key come from the
-// mobile env file (public by design). OPS_EMAIL and OPS_PASSWORD (and
-// OFF_CONTACT_EMAIL for configure) come from the operator's shell. Nothing
+// mobile env file (public by design). OPS_EMAIL and OPS_PASSWORD come from
+// the operator's shell. Nothing
 // here prints a token, password, key or the contact email: only booleans,
 // counts, statuses and provider data that is public anyway.
 
@@ -86,7 +87,9 @@ function sanitizedProvider(p: Record<string, unknown>) {
     credential_model: p.credential_model,
     capabilities: p.capabilities,
     adapter: p.adapter,
+    // A pre-48 API returned the stored contact; it is masked, never printed.
     configuration: Object.fromEntries(Object.entries(config).map(([k, v]) => [k, k === 'contact_email' ? (typeof v === 'string' && v.includes('@') ? 'set' : 'missing') : v])),
+    private_settings: p.private_settings ?? 'not reported (API before migration 48)',
     health: p.health,
   };
 }
@@ -135,15 +138,13 @@ async function main(): Promise<number> {
     }
 
     if (args.command === 'configure' || args.command === 'disable') {
-      const contact = process.env.OFF_CONTACT_EMAIL ?? '';
-      if (args.command === 'configure' && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(contact)) throw new Error('Set OFF_CONTACT_EMAIL to the contact address for the User-Agent.');
       const body =
         args.command === 'disable'
           ? { enabled: false }
           : {
               enabled: true,
               environment: 'production',
-              configuration: { app_name: 'MyRecipeBook', app_version: '1.0', contact_email: contact },
+              configuration: { app_name: 'MyRecipeBook', app_version: '1.0' },
               capabilities: [
                 { capability: 'barcode_lookup', enabled: true, priority: 30 },
                 { capability: 'nutrition_lookup', enabled: true, priority: 30 },
@@ -211,11 +212,13 @@ async function main(): Promise<number> {
       })),
     });
 
-    const exposures = findExposures(r.json, { keys: SENSITIVE_KEYS, values: [process.env.OFF_CONTACT_EMAIL ?? '', 'MyRecipeBook/', 'off:off'] });
-    // Runtime routing RPC: callable by any signed-in user (Layer 11D design).
+    const exposures = findExposures(r.json, { keys: SENSITIVE_KEYS, values: ['MyRecipeBook/', 'off:off'] });
+    // Runtime routing RPC: callable by any signed-in user, so it must carry
+    // nothing private (migration 48).
     const routes = await supabase.rpc('enabled_provider_routes', { p_family: 'product_data', p_capability: 'barcode_lookup' });
     const offRoute = ((routes.data ?? []) as Array<Record<string, unknown>>).find((row) => row.provider_key === PROVIDER);
     const routeConfig = (offRoute?.configuration ?? {}) as Record<string, unknown>;
+    const adminProbe = await call('GET', `/v1/admin/integrations/${PROVIDER}`);
     show('checks', {
       reference_rows_before: before,
       reference_rows_after: after,
@@ -224,9 +227,14 @@ async function main(): Promise<number> {
       all_candidates_not_loggable: candidates.every((c) => c.loggable === false),
       all_candidates_attributed: candidates.every((c) => c.provenance?.attribution?.required === true && !!c.provenance?.attribution?.licence),
       lookup_response_sensitive_paths: exposures,
+      lookup_response_contains_email: JSON.stringify(r.json).includes('@'),
+      signed_in_user_admin_api_status: adminProbe.status,
       routing_rpc_visible_to_signed_in_users: routes.error ? `error ${routes.error.code}` : !!offRoute,
+      routing_rpc_columns: offRoute ? Object.keys(offRoute).sort() : [],
+      routing_rpc_configuration_keys: Object.keys(routeConfig).sort(),
       routing_rpc_returns_contact_email: typeof routeConfig.contact_email === 'string',
-      routing_rpc_returns_secret_reference: offRoute ? 'secret_reference' in offRoute : false,
+      routing_rpc_returns_any_email: JSON.stringify(routes.data ?? []).includes('@'),
+      routing_rpc_returns_credential_metadata: offRoute ? 'credential_attached' in offRoute || 'secret_reference' in offRoute : false,
     });
     return 0;
   } finally {

@@ -46,7 +46,8 @@ const A = () => as(SEED.accountA);
 const admin = () => as(ADMIN);
 
 const FS_CONFIG = { cache_ttl_seconds: 0, request_timeout_ms: 500 };
-const OFF_CONFIG = { contact_email: CONTACT, cache_ttl_seconds: 0, request_timeout_ms: 500 };
+// The User-Agent contact is a private setting from the API environment (migration 48), not configuration.
+const OFF_CONFIG = { cache_ttl_seconds: 0, request_timeout_ms: 500 };
 
 async function countReferenceRows() {
   const { rows } = await pool.query(
@@ -79,7 +80,7 @@ beforeAll(async () => {
     logger: pino({ level: 'trace' }, sink),
     integrations: {
       registry: createDefaultAdapterRegistry({ fetch: http.fetch, now }),
-      secrets: new EnvSecretResolver({ FATSECRET_CLIENT_ID: FS_CLIENT_ID, FATSECRET_CLIENT_SECRET: FS_CLIENT_SECRET }),
+      secrets: new EnvSecretResolver({ FATSECRET_CLIENT_ID: FS_CLIENT_ID, FATSECRET_CLIENT_SECRET: FS_CLIENT_SECRET, OPEN_FOOD_FACTS_CONTACT_EMAIL: CONTACT }),
       deploymentEnvironment: 'test',
       now,
     },
@@ -131,8 +132,11 @@ describe('42 A-C: the real adapters register through the 11C framework', () => {
     // the credential reference must be the one the adapter declares
     const other = await admin().patch(`${ADMIN_BASE}/fatsecret`, { secret_reference: 'env:SOME_OTHER_SECRET' });
     expect(other.body.error.details.reason).toBe('secret_reference_not_declared_by_adapter');
-    // an OFF configuration without a contact is refused
-    expect((await admin().patch(`${ADMIN_BASE}/open_food_facts`, { configuration: { app_name: 'MyRecipeBook' } })).status).toBe(400);
+    // the contact is a private setting from the API environment, never configuration (migration 48)
+    const contact = await admin().patch(`${ADMIN_BASE}/open_food_facts`, { configuration: { ...OFF_CONFIG, contact_email: CONTACT } });
+    expect(contact.status).toBe(400);
+    expect(contact.body.error.details.reason).toBe('private_setting_in_configuration');
+    expect(off.body.private_settings).toEqual([{ name: 'contact_email', configured: true }]);
   });
 
   it('45 G / 31: platform_admin tests both connections with minimal read requests; results land in health', async () => {
@@ -392,8 +396,8 @@ describe('45: security', () => {
     const db = new PgHarnessScopedDbFactory(pool).forUser({ accountId: SEED.accountA, accessToken: signTestToken(SEED.accountA) } as never);
     const rows = await db.rpcRows<Record<string, unknown>>('enabled_provider_routes', { p_family: 'product_data', p_capability: 'barcode_lookup' });
     expect(rows.map((r) => r.provider_key)).toEqual(['fatsecret', 'open_food_facts']);
-    for (const row of rows) expect(Object.keys(row).sort()).toEqual(['configuration', 'credential_attached', 'environment', 'priority', 'provider_key']);
-    expect(JSON.stringify(rows)).not.toMatch(/env:|FATSECRET_CLIENT|client_id|secret_reference/i);
+    for (const row of rows) expect(Object.keys(row).sort()).toEqual(['configuration', 'environment', 'priority', 'provider_key']);
+    expect(JSON.stringify(rows)).not.toMatch(/env:|FATSECRET_CLIENT|client_id|secret_reference|credential|contact|@/i);
     // and the registry table itself stays unreadable to them
     expect(await db.select('external_provider', { columns: 'provider_key, secret_reference', limit: 10 })).toEqual([]);
   });
