@@ -271,7 +271,7 @@ Expo Go covers the alpha. For the barcode camera (12B) and later native health i
 
 Update this table when a live run happens: record the date, and the device and OS for phone tests.
 
-Last live runs: 2026-10-01/02 and 2026-10-10 on DEV project `psundpxqgiknxnjudmxv` (Singapore), with the API on Render (Starter, Singapore, commit `d9ab3b7`).
+Last live runs: 2026-10-01/02, 2026-10-10 and 2026-10-16 on DEV project `psundpxqgiknxnjudmxv` (Singapore), with the API on Render (Starter, Singapore, commit `d9ab3b7`).
 
 | Area | Status | Evidence |
 |---|---|---|
@@ -291,7 +291,8 @@ Last live runs: 2026-10-01/02 and 2026-10-10 on DEV project `psundpxqgiknxnjudmx
 | Reference Foods on DEV | LOADED (179, USDA SR Legacy) | migration 47 applied; A–O re-verified after 47 |
 | Reference Products on DEV | NONE | no Product ingestion yet |
 | Development build (EAS) | NOT TESTED | §8 |
-| FatSecret / Open Food Facts | NOT TESTED (not configured on DEV) | Layer 11D opt-in live smoke |
+| Open Food Facts barcode lookup (Option A) | LIVE VERIFIED (2026-10-16) | §11: enabled through the 11C admin API; connection test healthy; `3017624010701` returned one unconfirmed, non-loggable, attributed candidate; product, barcode, label, nutrient, serving, raw_content, import_job and ai_extraction tables all still 0 (owner check); physical iPhone: 3 products found as candidates, 1 not found |
+| FatSecret | NOT TESTED (not configured on DEV) | Layer 11D opt-in live smoke |
 
 ## 10. Reference data: trusted USDA ingestion (Layer 12B.1)
 
@@ -358,3 +359,34 @@ Safety checks:
 - **Dry run first.** Without `--apply`, every check and write runs and is then rolled back.
 - **TLS.** TLS certificates are always verified. Supabase's pooler certificate is signed by Supabase's own CA, which macOS does not trust by default. Download it from Project Settings → Database → SSL Configuration (`prod-ca-2021.crt`) and pass it with `--ca-file`.
 - **Exit codes.** `0` means done; `2` means stopped for review (changed or conflicting records); `1` means invalid input.
+
+## 11. Open Food Facts on DEV (Option A)
+
+Open Food Facts is the existing Layer 11D adapter, configured through the Layer 11C admin API. It provides barcode lookup only, plus candidate detail (`nutrition_lookup`). `product_search` stays disabled because Open Food Facts search is not implemented. There is no credential (`credential_model: none`), only an identifying User-Agent: `MyRecipeBook/1.0 (<contact email>)`.
+
+**Results.** Every result is an `unconfirmed_external_candidate` with `loggable: false`. It carries Open Food Facts attribution and the ODbL/DbCL licence, and is held only in API memory. Nothing is written to Product, Barcode, ProductLabelVersion, ProductNutrient or ProductServing.
+
+### 11.1 Operator steps
+
+1. **Grant platform_admin (once, SQL editor, as owner).** Insert a `platform_role_assignment` row (`role = 'platform_admin'`) for the operator's Account. The Account id equals the Supabase Auth user id. There is no client path.
+2. **Run the operator command** `npm run ops:off` in `api/`. It runs on your own machine and is not part of the API image. It signs in through normal Supabase Auth and reads the API URL and publishable key from `../mobile/.env.local`. It prints no token, password, key or contact email.
+
+```bash
+cd api
+export OPS_EMAIL='<operator sign-in email>'
+read -rs "OPS_PASSWORD?App password (hidden): "; export OPS_PASSWORD
+export OFF_CONTACT_EMAIL='<contact address>'          # configure only
+npm run ops:off -- status    --project-ref <ref>
+npm run ops:off -- configure --project-ref <ref>      # enable, production host, User-Agent fields
+npm run ops:off -- test      --project-ref <ref>      # one real read, records health only
+npm run ops:off -- lookup 3017624010701 --project-ref <ref>   # consumer flow + persistence/exposure checks
+npm run ops:off -- disable   --project-ref <ref>      # rollback
+unset OPS_PASSWORD OPS_EMAIL OFF_CONTACT_EMAIL
+```
+
+### 11.2 Known limits
+
+- **Contact email is not private.** It is stored as non-secret configuration. `enabled_provider_routes()` returns that configuration to any signed-in user, by Layer 11D design. Admin audit events record only changed field names, never values. Before real users, use a dedicated project mailbox. Changing it needs only `configure`, no code change.
+- **Coverage depends on Open Food Facts.** Products that Open Food Facts does not know still show as not found.
+- **Candidates cannot be logged yet.** Turning a candidate into a confirmed Product is a separate, unapproved step.
+
