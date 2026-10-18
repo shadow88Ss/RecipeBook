@@ -879,3 +879,13 @@ FatSecret and Open Food Facts `product_data` adapters on the Layer 11C framework
 **Cache.** In-memory, per adapter, ≤ 2000 entries, normalized candidates (and not-found answers) only; key = provider + operation + identifier/query + locale/environment; TTL = `cache_ttl_seconds` capped by the provider policy (both 24 h); expired entries are never served; a cached answer keeps its original `retrieved_at` and reports `freshness.served_from_cache`.
 
 **Testing.** The automated suite uses deterministic HTTP fixtures (`tests/helpers/providerFixtures.ts`); it is mock-verified behaviour, not live-provider verification.
+
+## 31. Phase 4 Layer 12B.2a — Trusted Branded Product Label Entry
+
+**No API change.** Products published by the operator label-entry command (`40_Development_Environment.md` §12) are served by the existing Layer 11A/11B endpoints, unchanged:
+- `GET /v1/products/barcode/{code}` and `/lookup`: internal-first, so a published Product wins over any provider candidate;
+- `GET /v1/products/{id}`;
+- `POST /v1/products/{id}/nutrition/calculate`;
+- Product meal items.
+
+No consumer or admin product-writing endpoint exists. The Admin Product API is Layer 12B.2b, not yet approved.

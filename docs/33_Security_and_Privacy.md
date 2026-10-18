@@ -269,3 +269,19 @@ RLS controls rows, not columns. `profile`'s current column set (`id`, `account_i
   - Admin DTOs show only a configured flag.
   - Routing returns key, priority, environment and non-sensitive operational configuration only.
   - Tested as an ordinary user, an admin, anon and on the pre-48 schema (`migration48.privateProviderSettings.test.ts`). No service-role key, new database credential or new authentication mechanism was added.
+
+## 12. Trusted branded Product label entry (Phase 4 Layer 12B.2a)
+
+- **No new write path.** Products, label versions, nutrients, servings and barcodes are still written only by trusted ingestion.
+  - The command is `npm run publish:label`, run by the operator over a direct, TLS-verified database connection with the operator's own database password. It is project-ref checked, dry run by default, and needs `--apply --confirm <gtin>` to write.
+  - It is not an API route, not in the production image, and adds no service-role key, role or grant.
+  - Ordinary users still have SELECT only and cannot execute `publish_product_label_version` (regression-tested).
+- **Authority.** Only a physical manufacturer label (or the operator's verified transcription of it) is accepted, as `manufacturer_label`.
+  - The file format has no field for a provider candidate, generic Food, AI or estimate.
+  - The command imports no provider integration.
+  - Open Food Facts and FatSecret candidates stay separate. An internal Product wins barcode lookup, and nothing external is copied.
+- **Integrity.**
+  - One transaction per label, serialized per GTIN by an advisory lock.
+  - A barcode is never reassigned, merged or overwritten; conflicts stop the run.
+  - Label history is immutable (Layer 11A triggers), and a new version needs explicit confirmation.
+- **Privacy.** Label files carry no personal data (`observed_at` is a shop name). Label photos are git-ignored and never read by the command. No audit_event row is written for operator publication; provenance is recorded on the rows themselves (the observed date, basis and input hash in `provenance_reference`).

@@ -16,7 +16,8 @@
     "test:live": "LIVE_PROVIDER_SMOKE=1 vitest run tests/live",
     "test:live-env": "LIVE_ENV_SMOKE=1 vitest run tests/live/liveEnvironment.smoke.test.ts",
     "ingest:usda": "tsx src/ingestion/usda/cli.ts",
-    "ops:off": "tsx src/operator/openFoodFactsDev.ts"
+    "ops:off": "tsx src/operator/openFoodFactsDev.ts",
+    "publish:label": "tsx src/ingestion/products/cli.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",

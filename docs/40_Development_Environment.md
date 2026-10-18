@@ -419,3 +419,54 @@ select
 -- expected: provider_key,priority,environment,configuration | 1 | 0
 ```
 
+## 12. Trusted branded Product label entry (Layer 12B.2a, operator only)
+
+This step publishes real branded Products from their **physical manufacturer label**. There is no API endpoint for it. The command `npm run publish:label` in `api/` connects like the USDA ingestion (§10.5):
+- it uses `INGEST_DATABASE_URL` from your own shell;
+- the connection must name the project ref, and TLS is verified (Supabase CA via `--ca-file`);
+- it is not part of the production image and uses no service-role key.
+
+### 12.1 The label file
+
+Create one JSON file per product. The format is shown by `api/src/ingestion/products/examples/SYNTHETIC-EXAMPLE.label.json`; that file is marked `synthetic: true` and can never be published. Real files go in `api/src/ingestion/products/labels/` (photos there are git-ignored).
+
+**Transcribe what the label states:**
+- **Product:** brand, product name, variant, market `AE` and package size.
+- **Barcode:** the digits under the bars, and their format (`ean_13`, `ean_8`, `upc_a`, `upc_e` or `gtin_14`).
+- **Observation:** the date you read the label (`observed_on`) and, optionally, the shop.
+- **Effective date:** a manufacturer effective date only if the label actually states one.
+- **Basis:** `per_100g`, `per_100ml` or `per_serving`.
+- **Serving:** its description and stated mass or volume, and servings per package if printed.
+- **Carbohydrate:** whether the label states `total` or `available` carbohydrate.
+- **Nutrients:** each value with its unit.
+
+**Publication policy (initial):**
+- **Required:** `energy` (kcal), `protein`, `carbohydrate` (total) and `fat`, each in g except energy. A stated 0 is fine; a missing value is never invented.
+- **kJ only:** energy given only in kJ is refused. kJ is never converted, and energy is never computed from macros.
+- **Available carbohydrate:** EU/UK-style labels state available carbohydrate, which is not mapped (needs an approved policy).
+- **Units:** canonical keys must use their vocabulary unit (sodium in mg, and so on). Salt, sugars, saturated fat and other names are reported as **not stored**. Vitamin A/D/E, niacin and folate need a measure review and are not mapped here.
+- **Per-serving labels:** these need the serving's mass or volume. A serving in ml with nutrition per g (or the other way round) is refused, because a Product has no density.
+
+### 12.2 Dry run, review, apply
+
+```bash
+cd api
+read -rs "PGPW?Database password (hidden): "; echo
+export INGEST_DATABASE_URL="postgresql://postgres.<ref>:$(node -e 'process.stdout.write(encodeURIComponent(process.env.PGPW))')@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres"; unset PGPW
+npm run publish:label -- --file src/ingestion/products/labels/<file>.label.json --project-ref <ref> --ca-file <prod-ca-2021.crt>        # dry run
+npm run publish:label -- ... --apply --confirm <canonical GTIN printed by the dry run>                                                     # writes
+unset INGEST_DATABASE_URL
+```
+
+**Outcomes, per canonical GTIN, all in one transaction under a per-GTIN advisory lock:**
+
+| Situation | Outcome |
+|---|---|
+| New barcode, new Product | **CREATE**: Product (`source manufacturer_data`, no generic Food link), Barcode (canonical GTIN plus the submitted digits) and label version 1 through `publish_product_label_version` (`manufacturer_label`) |
+| Same Product, same current label | **UNCHANGED**: nothing written. The observation date is not part of the comparison |
+| Same Product, different label | **STOP** unless `--new-label-version` confirms the manufacturer label itself changed; then version n+1 becomes current and version n is superseded, never edited |
+| Barcode belongs to a Product with a different identity | **STOP** (`product_identity_mismatch`). Never reassigned or overwritten |
+| Barcode only retired | **STOP** (`barcode_previously_retired`). Reassignment is a separate, unapproved workflow |
+| Same brand, name, variant and market under another barcode | **STOP** (`possible_duplicate_product`) |
+
+Exit codes: `0` done, `2` stopped (conflict), `1` invalid file or input.

@@ -782,3 +782,18 @@ Migration `20261016120000_private_provider_settings.sql` (additive). **No new ta
 - **Constraint `external_provider_configuration_not_private`.** Configuration may not contain a key matching `e-?mail|contact|phone` (case-insensitive) or an e-mail-like string value, at any depth.
 - **`enabled_provider_routes(p_family, p_capability)`** is replaced (drop + create; same SECURITY DEFINER, `authenticated` only). It returns `provider_key text, priority int, environment provider_environment, configuration jsonb`. `credential_attached` is removed.
 - **Private settings.** These are declared per adapter in code (Open Food Facts: `contact_email` → `env:OPEN_FOOD_FACTS_CONTACT_EMAIL`), resolved by the API from its environment, and never stored. **PII:** an operator contact address only, outside the database.
+
+## 44. Trusted branded Product label entry (Phase 4 Layer 12B.2a)
+
+**No schema change.** The operator command writes the existing Layer 11A entities:
+
+- **product:** `source = manufacturer_data`, `food_id = null`, `provenance_reference` = the label provenance.
+- **barcode:** `gtin` canonical, `barcode_type` and `submitted_code` as printed, `source = manufacturer_data`.
+- **label version:** published through `publish_product_label_version(product, 'manufacturer_label', provenance, effective_from, nutrients, servings)`.
+- **Label dates:**
+  - `effective_from` holds a manufacturer-stated effective date only (otherwise null);
+  - the operator's observation date is recorded in `provenance_reference`, as `observed YYYY-MM-DD`;
+  - the publication date is `created_at`.
+- **Provenance text:** `servings per package` (no column) and the first 16 hex characters of the input file's SHA-256 are also recorded in `provenance_reference`.
+- **Nutrients:** `product_nutrient` uses the label basis as stated (`100 g`, `100 ml`, or the serving's own mass or volume).
+- **Servings:** a `product_serving` is stored only when the label states its mass or volume, in the same unit as the nutrition basis.

@@ -1,0 +1,35 @@
+{
+  "schema": "myrecipebook-product-label-1",
+  "synthetic": true,
+  "product": {
+    "brand_name": "SYNTHETIC EXAMPLE",
+    "product_name": "Example only - not a real product",
+    "variant_name": "Plain",
+    "manufacturer_name": null,
+    "market": "AE",
+    "package": { "quantity": 400, "unit": "g" }
+  },
+  "barcode": { "code": "6290000000016", "format": "ean_13" },
+  "label": {
+    "source": "physical_manufacturer_label",
+    "observed_on": "2026-10-18",
+    "observed_at": "Example retailer",
+    "manufacturer_effective_date": null,
+    "basis": "per_100g",
+    "serving": { "description": "1 cup", "quantity": 40, "unit": "g" },
+    "servings_per_package": 10,
+    "carbohydrate_definition": "total",
+    "nutrients": [
+      { "key": "energy", "amount": 380, "unit": "kcal" },
+      { "key": "energy", "amount": 1590, "unit": "kJ" },
+      { "key": "protein", "amount": 10.5, "unit": "g" },
+      { "key": "carbohydrate", "amount": 64, "unit": "g" },
+      { "key": "Sugars", "amount": 12, "unit": "g" },
+      { "key": "fat", "amount": 8.2, "unit": "g" },
+      { "key": "Saturated fat", "amount": 1.4, "unit": "g" },
+      { "key": "fiber", "amount": 0, "unit": "g" },
+      { "key": "sodium", "amount": 320, "unit": "mg" }
+    ],
+    "notes": "Synthetic values for documentation; never published."
+  }
+}

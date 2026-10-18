@@ -412,3 +412,7 @@ New entities **PlatformRoleAssignment** (Account → `platform_role`, starting w
 ### 4.10 External product data providers (Phase 3 Layer 11D)
 
 **No new entity.** FatSecret and Open Food Facts results are API-level **ExternalProductCandidate** values (provider-neutral contract `external-product-candidate-11d.1`, see `30_API.md` §30) held only in API memory; they are not stored and do not reference Product, ProductLabelVersion, ProductNutrient, ProductServing, Barcode or Food. Migration `20261013120000_external_product_providers.sql` only (a) replaces `enabled_provider_routes()` so it no longer returns `secret_reference` and (b) disables the seeded capability rows no adapter implements (FatSecret `food_search`, Open Food Facts `product_search`). Data Dictionary §42.
+
+### 4.11 Trusted branded Product label entry (Phase 4 Layer 12B.2a)
+
+There are no new entities or columns. Real branded Products are created from physical manufacturer labels by an operator-only command, which writes Product, Barcode and ProductLabelVersion (with ProductNutrient and ProductServing) through the Layer 11A publishing function. Data Dictionary §44; the workflow is in `40_Development_Environment.md` §12.
