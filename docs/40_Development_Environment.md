@@ -272,7 +272,7 @@ Expo Go covers the alpha. For the barcode camera (12B) and later native health i
 
 Update this table when a live run happens: record the date, and the device and OS for phone tests.
 
-Last live runs: 2026-10-01/02, 2026-10-10 and 2026-10-16 on DEV project `psundpxqgiknxnjudmxv` (Singapore), with the API on Render (Starter, Singapore, commit `d9ab3b7`).
+Last live runs: 2026-10-01/02, 2026-10-10, 2026-10-16 and 2026-10-18 on DEV project `psundpxqgiknxnjudmxv` (Singapore), with the API on Render (Starter, Singapore, commit `d9ab3b7`).
 
 | Area | Status | Evidence |
 |---|---|---|
@@ -293,6 +293,7 @@ Last live runs: 2026-10-01/02, 2026-10-10 and 2026-10-16 on DEV project `psundpx
 | Reference Products on DEV | NONE | no Product ingestion yet |
 | Development build (EAS) | NOT TESTED | §8 |
 | Open Food Facts barcode lookup (Option A) | LIVE VERIFIED (2026-10-16) | §11: enabled through the 11C admin API; connection test healthy; `3017624010701` returned one unconfirmed, non-loggable, attributed candidate; product, barcode, label, nutrient, serving, raw_content, import_job and ai_extraction tables all still 0 (owner check); physical iPhone: 3 products found as candidates, 1 not found |
+| Private provider settings (migration 48) | LIVE VERIFIED (2026-10-18) | Order followed: Render variable `OPEN_FOOD_FACTS_CONTACT_EMAIL`, then API `b7a19d8`, then migration 48. SQL: routing columns `provider_key,priority,environment,configuration`, guard constraint present, 0 stored private values. Admin `status`: `private_settings contact_email configured: true`, no contact in configuration. Lookup `3017624010701` found an unconfirmed, non-loggable, attributed candidate; the routing function returned no email and no credential metadata; reference rows unchanged. The ordinary-user live lookup (User B) was not run because the password was unavailable; it is covered by `migration48.privateProviderSettings.test.ts`, and SQL confirms User B holds no platform_admin role |
 | FatSecret | NOT TESTED (not configured on DEV) | Layer 11D opt-in live smoke |
 
 ## 10. Reference data: trusted USDA ingestion (Layer 12B.1)
@@ -400,6 +401,8 @@ unset OPS_PASSWORD OPS_EMAIL
 - The database refuses the same shapes with the constraint `external_provider_configuration_not_private`.
 
 **Safe order.** A new API runs on the old database too: it ignores a stored contact. The old API does not run on the new database.
+
+Lesson from the DEV rollout (2026-10-18): Render showed the deploy as live while the old API was still answering, and the variable was not present at first. Before applying 48, confirm with `npm run ops:off -- status` that it reports `private_settings` with `configured: true`. An old API reports no `private_settings` at all; `configured: false` means the variable is missing.
 1. Set `OPEN_FOOD_FACTS_CONTACT_EMAIL` on Render.
 2. Deploy the API.
 3. Apply migration 48.
