@@ -9,5 +9,5 @@ pack by the operator (format: `../examples/SYNTHETIC-EXAMPLE.label.json`,
   any other source.
 - No personal data in any field (`observed_at` is a shop name, not a person).
 - Photos stay on your own device: image files are ignored here by `.gitignore`.
-- Commit a file only after its dry run has been reviewed and it was published,
-  so the repository records exactly what was entered.
+- A file is committed so its dry run can run on the operator machine; it is
+  published only after the values and the dry run were reviewed and approved.

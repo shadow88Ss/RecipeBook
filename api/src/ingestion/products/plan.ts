@@ -176,7 +176,9 @@ export function buildLabelPlan(raw: unknown, rawText?: string): LabelPlan {
     if (serving.quantity === null || serving.unit === null) {
       if (basis !== 'per_serving') warnings.push(`serving "${serving.description}" states no mass or volume, so it is not stored; log this Product by ${basisUnit}`);
     } else if (serving.unit !== basisUnit) {
-      problems.push(`label.serving: the serving is in ${serving.unit} but nutrition is per ${basisUnit}; a Product has no density, so this serving cannot be used`);
+      // Only reachable for a per-100 basis (a per-serving basis takes the serving's own unit).
+      notMapped.push(`serving "${serving.description}" = ${serving.quantity} ${serving.unit}: nutrition is per ${basisUnit} and a Product has no density, so this serving is not stored`);
+      warnings.push(`log this Product by ${basisUnit}; its ${serving.unit} serving cannot be used`);
     } else {
       servings.push({ description: serving.description, quantity: serving.quantity, unit: serving.unit });
     }

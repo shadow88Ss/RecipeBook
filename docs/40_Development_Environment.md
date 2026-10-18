@@ -445,7 +445,7 @@ Create one JSON file per product. The format is shown by `api/src/ingestion/prod
 - **kJ only:** energy given only in kJ is refused. kJ is never converted, and energy is never computed from macros.
 - **Available carbohydrate:** EU/UK-style labels state available carbohydrate, which is not mapped (needs an approved policy).
 - **Units:** canonical keys must use their vocabulary unit (sodium in mg, and so on). Salt, sugars, saturated fat and other names are reported as **not stored**. Vitamin A/D/E, niacin and folate need a measure review and are not mapped here.
-- **Per-serving labels:** these need the serving's mass or volume. A serving in ml with nutrition per g (or the other way round) is refused, because a Product has no density.
+- **Per-serving labels:** these need the serving's mass or volume. On a per-100 label, a serving in the other unit (ml vs g) is reported as not stored, because a Product has no density; the label still publishes, and the Product is logged by weight or volume.
 
 ### 12.2 Dry run, review, apply
 

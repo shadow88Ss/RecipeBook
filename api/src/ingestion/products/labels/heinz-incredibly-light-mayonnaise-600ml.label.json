@@ -1,0 +1,38 @@
+{
+  "schema": "myrecipebook-product-label-1",
+  "product": {
+    "brand_name": "Heinz",
+    "product_name": "Mayonnaise",
+    "variant_name": "Incredibly Light",
+    "manufacturer_name": "Al Ain National Juice & Refreshments Co.",
+    "market": "AE",
+    "package": { "quantity": 600, "unit": "ml" }
+  },
+  "barcode": { "code": "6290090018434", "format": "ean_13" },
+  "label": {
+    "source": "physical_manufacturer_label",
+    "observed_on": "2026-10-18",
+    "observed_at": null,
+    "manufacturer_effective_date": null,
+    "basis": "per_100g",
+    "serving": { "description": "1 tbsp (15ml)", "quantity": 15, "unit": "ml" },
+    "servings_per_package": 40,
+    "carbohydrate_definition": "total",
+    "nutrients": [
+      { "key": "energy", "amount": 199, "unit": "kcal" },
+      { "key": "fat", "amount": 17.5, "unit": "g" },
+      { "key": "Saturated Fat", "amount": 3, "unit": "g" },
+      { "key": "Trans Fat", "amount": 0.1, "unit": "g" },
+      { "key": "Monounsaturated Fat", "amount": 4, "unit": "g" },
+      { "key": "Polyunsaturated Fat", "amount": 11, "unit": "g" },
+      { "key": "Cholesterol", "amount": 16, "unit": "mg" },
+      { "key": "sodium", "amount": 795, "unit": "mg" },
+      { "key": "carbohydrate", "amount": 10, "unit": "g" },
+      { "key": "fiber", "amount": 0.2, "unit": "g" },
+      { "key": "Total Sugars", "amount": 4.6, "unit": "g" },
+      { "key": "Added Sugars", "amount": 4.6, "unit": "g" },
+      { "key": "protein", "amount": 0.3, "unit": "g" }
+    ],
+    "notes": "US-style Nutrition Facts panel, Amount per 100g, Total Carbohydrate. Made in United Arab Emirates."
+  }
+}

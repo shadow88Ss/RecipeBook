@@ -171,8 +171,12 @@ describe('basis and servings (P, Q, R)', () => {
     expect(plan.warnings[0]).toMatch(/states no mass or volume/);
   });
 
-  it('refuses a serving in ml when nutrition is per g (no Product density)', () => {
-    expect(problems(withLabel({ serving: { description: '1 cup', quantity: 240, unit: 'ml' } }))).toMatch(/Product has no density/);
+  it('does not store a serving in ml when nutrition is per 100 g (no Product density); the label still publishes', () => {
+    const plan = buildLabelPlan(withLabel({ serving: { description: '1 tbsp (15ml)', quantity: 15, unit: 'ml' } }));
+    expect(plan.label.servings).toEqual([]);
+    expect(plan.label.nutrients.every((n) => n.basis_unit === 'g')).toBe(true);
+    expect(plan.notMapped).toContain('serving "1 tbsp (15ml)" = 15 ml: nutrition is per g and a Product has no density, so this serving is not stored');
+    expect(plan.warnings).toContain('log this Product by g; its ml serving cannot be used');
   });
 });
 
