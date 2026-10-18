@@ -125,6 +125,7 @@ describe('operator command guards', () => {
     expect(checkTarget('postgresql://postgres.psundpxqgiknxnjudmxv:pw@aws-0-x.pooler.supabase.com:5432/postgres', 'psundpxqgiknxnjudmxv').local).toBe(false);
     expect(() => checkTarget('postgresql://postgres:pw@db.example.com:5432/postgres', 'local')).toThrow(/localhost/);
     expect(() => checkTarget('https://x', 'local')).toThrow(/postgres/);
+    expect(() => checkTarget('postgresql://postgres.psundpxqgiknxnjudmxv:@aws-0-x.pooler.supabase.com:5432/postgres', 'psundpxqgiknxnjudmxv')).toThrow(/no password/);
   });
 });
 

@@ -52,6 +52,7 @@ export function checkTarget(databaseUrl: string, projectRef: string): { host: st
     throw new Error('INGEST_DATABASE_URL is not a valid postgres URL');
   }
   if (!/^postgres(ql)?:$/.test(url.protocol)) throw new Error('INGEST_DATABASE_URL must be a postgres:// URL');
+  if (!url.password) throw new Error('INGEST_DATABASE_URL has no password in it (the password variable was empty when the URL was built)');
   const local = ['localhost', '127.0.0.1', '::1'].includes(url.hostname);
   if (projectRef === 'local') {
     if (!local) throw new Error('--project-ref local only allows a localhost database');
