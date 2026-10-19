@@ -21,6 +21,8 @@ const REQUIRED_KEYS = [
   'vitamin_a', 'vitamin_c', 'vitamin_d', 'vitamin_e', 'vitamin_k',
   'thiamin', 'riboflavin', 'niacin', 'vitamin_b6', 'folate', 'vitamin_b12',
 ];
+/** Layer 12B.3 manufacturer-label identities (migration 20261019120000). */
+const LABEL_KEYS = ['available_carbohydrate', 'total_sugars', 'added_sugars', 'saturated_fat'];
 
 describe('A-D: canonical nutrient vocabulary', () => {
   it('A: has exactly one energy identity: energy, in kcal', () => {
@@ -37,13 +39,22 @@ describe('A-D: canonical nutrient vocabulary', () => {
 
   it('C: every required identity exists exactly once, with a stable language-neutral key', () => {
     const keys = CANONICAL_NUTRIENTS.map((n) => n.key);
-    expect([...keys].sort()).toEqual([...REQUIRED_KEYS].sort());
+    expect([...keys].sort()).toEqual([...REQUIRED_KEYS, ...LABEL_KEYS].sort());
     expect(new Set(keys).size).toBe(keys.length);
     for (const key of keys) {
       expect(key).toMatch(/^[a-z][a-z0-9_]*$/);
       expect(NUTRIENT_KEYS[key as keyof typeof NUTRIENT_KEYS]).toBe(key);
     }
     for (const key of REQUIRED_KEYS.slice(5)) expect(CANONICAL_NUTRIENT_BY_KEY.get(key)?.role).toBe('micronutrient');
+  });
+
+  it('H: the 22 original identities are unchanged; the 4 label identities are g, role other, and distinct', () => {
+    expect(CANONICAL_NUTRIENTS.slice(0, 22).map((n) => n.key)).toEqual(REQUIRED_KEYS);
+    for (const key of LABEL_KEYS) expect(CANONICAL_NUTRIENT_BY_KEY.get(key)).toMatchObject({ role: 'other', unit: 'g', measure_requires_mapping_review: false });
+    expect(CANONICAL_NUTRIENT_BY_KEY.get('carbohydrate')).toMatchObject({ role: 'macronutrient', unit: 'g' });
+    expect(CANONICAL_NUTRIENT_BY_KEY.get('available_carbohydrate')?.definition).toMatch(/EXCLUDING dietary fiber/);
+    expect(CANONICAL_NUTRIENT_BY_KEY.get('added_sugars')?.definition).toMatch(/Never inferred from total sugars/);
+    expect(CANONICAL_NUTRIENT_BY_KEY.get('saturated_fat')?.definition).toMatch(/Never derived from total fat/);
   });
 
   it('D: reporting units are deterministic and follow the role rules (no IU, no kJ)', () => {
@@ -53,6 +64,7 @@ describe('A-D: canonical nutrient vocabulary', () => {
       sodium: 'mg', potassium: 'mg', calcium: 'mg', iron: 'mg', magnesium: 'mg', zinc: 'mg',
       vitamin_a: 'mcg', vitamin_c: 'mg', vitamin_d: 'mcg', vitamin_e: 'mg', vitamin_k: 'mcg',
       thiamin: 'mg', riboflavin: 'mg', niacin: 'mg', vitamin_b6: 'mg', folate: 'mcg', vitamin_b12: 'mcg',
+      available_carbohydrate: 'g', total_sugars: 'g', added_sugars: 'g', saturated_fat: 'g',
     });
     for (const n of CANONICAL_NUTRIENTS) {
       if (n.role === 'micronutrient') expect(['mg', 'mcg']).toContain(n.unit);

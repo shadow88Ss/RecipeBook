@@ -396,7 +396,7 @@ describe('POST /v1/foods/{food_id}/convert', () => {
 describe('GET /v1/nutrients, GET /v1/units, POST /v1/units/convert', () => {
   it('lists the nutrient vocabulary, paginated', async () => {
     const first = await request(app).get('/v1/nutrients').query({ limit: 2 }).set('Authorization', auth());
-    expect(first.body.data.map((n: { canonical_key: string }) => n.canonical_key)).toEqual(['calcium', 'carbohydrate']);
+    expect(first.body.data.map((n: { canonical_key: string }) => n.canonical_key)).toEqual(['added_sugars', 'available_carbohydrate']);
     const keys: string[] = [];
     let cursor: string | null = null;
     do {
@@ -407,7 +407,7 @@ describe('GET /v1/nutrients, GET /v1/units, POST /v1/units/convert', () => {
       keys.push(...page.body.data.map((n: { canonical_key: string }) => n.canonical_key));
       cursor = page.body.pagination.nextCursor;
     } while (cursor);
-    expect(keys).toHaveLength(22);
+    expect(keys).toHaveLength(26); // 22 + 4 label identities (Layer 12B.3)
     expect(keys).toContain('vitamin_b12');
     expect(new Set(keys).size).toBe(keys.length);
   });

@@ -889,3 +889,18 @@ FatSecret and Open Food Facts `product_data` adapters on the Layer 11C framework
 - Product meal items.
 
 No consumer or admin product-writing endpoint exists. The Admin Product API is Layer 12B.2b, not yet approved.
+
+## 32. Phase 4 Layer 12B.3 — Label Nutrient Vocabulary
+
+**No endpoint or contract change.** The generic nutrient lists include the four new identities, as rows in the existing shape:
+- `GET /v1/nutrients`;
+- each item's and aggregate's `nutrients[]` in nutrition, product, meal and Daily Tracker responses.
+
+The identities are `available_carbohydrate`, `total_sugars`, `added_sugars` and `saturated_fat`.
+
+The five-field `summary` is unchanged:
+- `carbohydrate_g` is still total carbohydrate;
+- a Product whose label states only available carbohydrate reports `carbohydrate_g` as unavailable (`no_data`) and its `available_carbohydrate` separately;
+- a day mixing both kinds of label reports `carbohydrate_g` as `partial`.
+
+Target writes accept the four keys (and their `<key>_g` aliases) as field names; no target is created automatically.

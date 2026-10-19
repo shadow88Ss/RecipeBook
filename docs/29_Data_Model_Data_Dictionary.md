@@ -797,3 +797,29 @@ Migration `20261016120000_private_provider_settings.sql` (additive). **No new ta
 - **Provenance text:** `servings per package` (no column) and the first 16 hex characters of the input file's SHA-256 are also recorded in `provenance_reference`.
 - **Nutrients:** `product_nutrient` uses the label basis as stated (`100 g`, `100 ml`, or the serving's own mass or volume).
 - **Servings:** a `product_serving` is stored only when the label states its mass or volume, in the same unit as the nutrition basis.
+
+## 45. Label nutrient vocabulary (Phase 4 Layer 12B.3)
+
+Migration `20261019120000_label_nutrient_vocabulary.sql` (migration 49, additive, rows only).
+
+**New `nutrient` rows** (all `g`, role `other`, so nothing that groups macronutrients counts them twice):
+
+| Key | Definition |
+|---|---|
+| `available_carbohydrate` | Carbohydrate **excluding** dietary fibre, as declared by EU/UK (Regulation 1169/2011: carbohydrate metabolised by humans, incl. polyols; fibre separate) and Codex-style labels. Never mapped to or from `carbohydrate`, which remains total carbohydrate including fibre (US by-difference; USDA FDC 1005) |
+| `total_sugars` | All mono- and disaccharides as declared (US "Total Sugars", EU "sugars") |
+| `added_sugars` | As declared; never inferred from total sugars |
+| `saturated_fat` | Saturated fatty acids as declared; never derived from total fat |
+
+**`target_field_alias`:** `<key>_g` for each of the four (generated, as for the original 22). The four keys are valid target field names; no target is created.
+
+**Unchanged:**
+- the 22 existing nutrient rows;
+- all `food_nutrient`, `product_nutrient`, `product_label_version` and `meal_item.nutrition_snapshot` data;
+- the USDA mapping (`usda-fdc-sr-legacy-map-1`);
+- grants and RLS.
+
+**Not added (approved policy):**
+- a salt identity or any salt to sodium conversion (salt is a label-only declaration);
+- any kJ to kcal conversion;
+- any total to or from available carbohydrate conversion.

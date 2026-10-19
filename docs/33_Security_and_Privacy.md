@@ -285,3 +285,10 @@ RLS controls rows, not columns. `profile`'s current column set (`id`, `account_i
   - A barcode is never reassigned, merged or overwritten; conflicts stop the run.
   - Label history is immutable (Layer 11A triggers), and a new version needs explicit confirmation.
 - **Privacy.** Label files carry no personal data (`observed_at` is a shop name). Label photos are git-ignored and never read by the command. No audit_event row is written for operator publication; provenance is recorded on the rows themselves (the observed date, basis and input hash in `provenance_reference`).
+
+## 13. Label nutrient vocabulary (Phase 4 Layer 12B.3)
+
+There is no security change. Migration 49 only adds `nutrient` and `target_field_alias` rows:
+- `nutrient` stays readable reference data that clients cannot write (regression-tested);
+- `target_field_alias` stays ungranted, read only by its trigger functions;
+- checks A–O are unchanged.

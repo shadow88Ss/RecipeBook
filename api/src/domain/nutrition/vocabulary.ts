@@ -69,6 +69,19 @@ export const CANONICAL_NUTRIENTS: readonly CanonicalNutrient[] = [
   nutrient('vitamin_b6', 'micronutrient', 'mg', 'Vitamin B6.'),
   nutrient('folate', 'micronutrient', 'mcg', 'Folate as dietary folate equivalents (mcg DFE). Food folate / total folate values are not mapped without an approved conversion.', true),
   nutrient('vitamin_b12', 'micronutrient', 'mcg', 'Vitamin B12 (cobalamin).'),
+
+  // Layer 12B.3 (migration 20261019120000): manufacturer-label identities.
+  // Role `other`: sub-components of, or an alternative to, a macronutrient,
+  // so nothing that groups macronutrients counts them twice.
+  nutrient(
+    'available_carbohydrate',
+    'other',
+    'g',
+    'Available carbohydrate: carbohydrate EXCLUDING dietary fiber, as declared by EU/UK (Regulation 1169/2011: carbohydrate metabolised by humans, including polyols; fibre declared separately) and Codex-style labels. Distinct from `carbohydrate` (total): never mapped to it and never converted from or to it.',
+  ),
+  nutrient('total_sugars', 'other', 'g', 'Total sugars (all mono- and disaccharides) as declared: US "Total Sugars", EU/UK "sugars". Includes added sugars.'),
+  nutrient('added_sugars', 'other', 'g', 'Added sugars as declared by the source (e.g. US "Includes Added Sugars"). Never inferred from total sugars.'),
+  nutrient('saturated_fat', 'other', 'g', 'Saturated fatty acids as declared (US "Saturated Fat", EU/UK "saturates"). Never derived from total fat.'),
 ];
 
 export const CANONICAL_NUTRIENT_BY_KEY: ReadonlyMap<string, CanonicalNutrient> = new Map(CANONICAL_NUTRIENTS.map((n) => [n.key, n]));
@@ -97,4 +110,8 @@ export const NUTRIENT_KEYS = {
   vitamin_b6: 'vitamin_b6',
   folate: 'folate',
   vitamin_b12: 'vitamin_b12',
+  available_carbohydrate: 'available_carbohydrate',
+  total_sugars: 'total_sugars',
+  added_sugars: 'added_sugars',
+  saturated_fat: 'saturated_fat',
 } as const;

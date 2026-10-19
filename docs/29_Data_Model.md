@@ -416,3 +416,11 @@ New entities **PlatformRoleAssignment** (Account → `platform_role`, starting w
 ### 4.11 Trusted branded Product label entry (Phase 4 Layer 12B.2a)
 
 There are no new entities or columns. Real branded Products are created from physical manufacturer labels by an operator-only command, which writes Product, Barcode and ProductLabelVersion (with ProductNutrient and ProductServing) through the Layer 11A publishing function. Data Dictionary §44; the workflow is in `40_Development_Environment.md` §12.
+
+### 4.12 Label nutrient vocabulary (Phase 4 Layer 12B.3)
+
+Four canonical nutrients are added by migration 49:
+- `available_carbohydrate`, `total_sugars`, `added_sugars` and `saturated_fat` (g, role `other`);
+- plus their target aliases.
+
+Existing nutrients, values, label versions and meal snapshots are unchanged. Data Dictionary §45.

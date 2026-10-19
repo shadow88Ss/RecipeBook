@@ -85,7 +85,7 @@ union all select 'O default_privileges_to_anon_or_authenticated', coalesce(strin
 order by 1;
 ```
 
-Expected (identical for a clean local build and for the live project). The current values are for all 47 migrations, and they are **unchanged by migration 48** (`private_provider_settings`), which adds only a check constraint and redefines a function with the same signature, security mode and grants (verify 48 with §11.3). Migration 47 (`food_source_record`, Layer 12B.1) adds one table, one policy and one trigger, plus SELECT for `authenticated`. The "after 46" column is kept for history.
+Expected (identical for a clean local build and for the live project). The current values are for all 47 migrations, and they are **unchanged by migrations 48 and 49**. Migration 48 (`private_provider_settings`) adds only a check constraint and redefines a function with the same signature, security mode and grants (verify 48 with §11.3). Migration 49 (`label_nutrient_vocabulary`) adds only rows (verify 49 with §12.3). Migration 47 (`food_source_record`, Layer 12B.1) adds one table, one policy and one trigger, plus SELECT for `authenticated`. The "after 46" column is kept for history.
 
 | Check | Expected (47 migrations) | After 46 |
 |---|---|---|
@@ -441,10 +441,12 @@ Create one JSON file per product. The format is shown by `api/src/ingestion/prod
 - **Nutrients:** each value with its unit.
 
 **Publication policy (initial):**
-- **Required:** `energy` (kcal), `protein`, `carbohydrate` (total) and `fat`, each in g except energy. A stated 0 is fine; a missing value is never invented.
+- **Required:** `energy` (kcal), `protein`, `fat` and a carbohydrate (total **or** available, Layer 12B.3), each in g except energy. A stated 0 is fine; a missing value is never invented.
 - **kJ only:** energy given only in kJ is refused. kJ is never converted, and energy is never computed from macros.
-- **Available carbohydrate:** EU/UK-style labels state available carbohydrate, which is not mapped (needs an approved policy).
-- **Units:** canonical keys must use their vocabulary unit (sodium in mg, and so on). Salt, sugars, saturated fat and other names are reported as **not stored**. Vitamin A/D/E, niacin and folate need a measure review and are not mapped here.
+- **Carbohydrate:** write the label's carbohydrate line as `carbohydrate` and declare its meaning in `carbohydrate_definition`. `total` (US "Total Carbohydrate", including fibre) is stored as `carbohydrate`; `available` (EU/UK/Codex style, excluding fibre) is stored as `available_carbohydrate`. One is never mapped to or computed from the other (no available + fibre), and the meaning is **never inferred from the market**, because UAE shelves carry both styles. `not_stated` is refused.
+- **Sugars and saturated fat:** `total_sugars`, `added_sugars` and `saturated_fat` (g) are stored as stated. Added sugars are never inferred from total sugars, and saturated fat is never derived from fat.
+- **Salt:** reported as **not stored** and never converted to sodium (no salt to sodium policy approved). A stated sodium (mg) is stored as is.
+- **Units:** canonical keys must use their vocabulary unit (sodium in mg, and so on). Other names (trans fat, cholesterol, mono/polyunsaturated fat) are reported as **not stored**. Vitamin A/D/E, niacin and folate need a measure review and are not mapped here.
 - **Per-serving labels:** these need the serving's mass or volume. On a per-100 label, a serving in the other unit (ml vs g) is reported as not stored, because a Product has no density; the label still publishes, and the Product is logged by weight or volume.
 
 ### 12.2 Dry run, review, apply
@@ -470,3 +472,40 @@ unset INGEST_DATABASE_URL
 | Same brand, name, variant and market under another barcode | **STOP** (`possible_duplicate_product`) |
 
 Exit codes: `0` done, `2` stopped (conflict), `1` invalid file or input.
+
+### 12.3 Label nutrient vocabulary (migration 49, Layer 12B.3)
+
+**What migration 49 changes.** It adds four nutrient identities (all g, role `other`), plus their generated target aliases (`<key>_g`, as Layer 7C did for the original 22):
+
+| Key | Meaning |
+|---|---|
+| `available_carbohydrate` | Carbohydrate excluding fibre (EU/UK/Codex labels) |
+| `total_sugars` | Total sugars |
+| `added_sugars` | Added sugars |
+| `saturated_fat` | Saturated fat |
+
+**What stays unchanged:**
+- the 22 existing nutrients (ids, units, roles, meanings), every food and product nutrient value, label version and meal snapshot;
+- USDA mappings and fingerprints;
+- grants and policies;
+- the five-field nutrition summary.
+
+**How existing data behaves:**
+- Meals logged before 49 report the new nutrients as unknown, never 0.
+- No target is created.
+- Heinz version 1 keeps its 6 values. Recording its sugars and saturated fat would take a reviewed `--new-label-version` publication, which was not done automatically.
+
+**Verify on DEV after `db push` (SQL Editor, read-only):**
+
+```sql
+select
+  (select count(*) from nutrient) as nutrients,
+  (select string_agg(canonical_key || ':' || unit || ':' || role, ', ' order by canonical_key) from nutrient
+    where canonical_key in ('available_carbohydrate', 'total_sugars', 'added_sugars', 'saturated_fat')) as label_nutrients,
+  (select count(*) from target_field_alias where canonical_key in ('available_carbohydrate', 'total_sugars', 'added_sugars', 'saturated_fat')) as new_aliases;
+-- expected: 26 | added_sugars:g:other, available_carbohydrate:g:other, saturated_fat:g:other, total_sugars:g:other | 4
+```
+
+Checks A–O (§2.2) must be unchanged.
+
+**Open research item.** The GCC/UAE definitions (GSO 2233 / GSO 9) of carbohydrate and salt could not be verified from an official source. Codex (CXG 2-1985), which GSO broadly follows, declares available carbohydrate. Until the official text is reviewed, each label's carbohydrate meaning comes only from the label itself, never from its market.

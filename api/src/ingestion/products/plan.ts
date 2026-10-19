@@ -9,14 +9,22 @@
 //   - only Layer 5C canonical keys in their reporting unit are stored;
 //   - a stated 0 is a known zero; a nutrient not on the label is absent;
 //   - kJ is never converted to kcal and energy is never computed (4/4/9);
-//   - carbohydrate is stored only when the label states TOTAL carbohydrate
-//     (the vocabulary definition); "available" carbohydrate is not mapped;
+//   - the label's carbohydrate line is stored under the identity its
+//     declared definition names: TOTAL carbohydrate (incl. fibre, US style)
+//     as `carbohydrate`, AVAILABLE carbohydrate (excl. fibre, EU/UK/Codex
+//     style) as `available_carbohydrate` (Layer 12B.3). One is never mapped
+//     to or computed from the other, and the definition is never inferred
+//     from the market;
+//   - total sugars, added sugars and saturated fat are stored as stated;
+//     added sugars are never inferred from total sugars, saturated fat never
+//     from total fat; salt is not stored and never converted to sodium;
 //   - nutrients whose measure needs a mapping review (vitamin A/D/E, niacin,
 //     folate) are not mapped in this operator workflow;
 //   - a per-serving label is usable only when the serving states its mass or
 //     volume; nothing assumes a serving's weight.
-// Initial publication policy: energy (kcal), protein, carbohydrate (total)
-// and fat must be stated (0 allowed), or the label is not published.
+// Publication policy: energy (kcal), protein, fat and a carbohydrate (total
+// or available, Layer 12B.3) must be stated (0 allowed), or the label is not
+// published.
 
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
@@ -206,8 +214,12 @@ export function buildLabelPlan(raw: unknown, rawText?: string): LabelPlan {
       notMapped.push(`${key} ${n.amount} ${unit}: the measure needs a mapping review; not mapped by operator entry`);
       continue;
     }
-    if (key === 'carbohydrate' && file.label.carbohydrate_definition !== 'total') {
-      notMapped.push(`carbohydrate ${n.amount} ${unit}: the label states ${file.label.carbohydrate_definition} carbohydrate, not total carbohydrate`);
+    if (key === 'available_carbohydrate') {
+      problems.push(`label.nutrients.${i}: write the label's carbohydrate line as "carbohydrate" and declare its meaning with label.carbohydrate_definition`);
+      continue;
+    }
+    if (key === 'carbohydrate' && file.label.carbohydrate_definition === 'not_stated') {
+      notMapped.push(`carbohydrate ${n.amount} ${unit}: the label does not say whether this is total or available carbohydrate`);
       continue;
     }
     if (unit !== canonical.unit) {
@@ -218,16 +230,18 @@ export function buildLabelPlan(raw: unknown, rawText?: string): LabelPlan {
       problems.push(`label.nutrients.${i}: ${key} is listed twice`);
       continue;
     }
+    // The declared definition decides the identity; nothing is converted.
+    const storedKey = key === 'carbohydrate' && file.label.carbohydrate_definition === 'available' ? 'available_carbohydrate' : key;
     seen.add(key);
-    nutrients.push({ key, amount: n.amount, basis_quantity: basisQuantity, basis_unit: basisUnit });
+    nutrients.push({ key: storedKey, amount: n.amount, basis_quantity: basisQuantity, basis_unit: basisUnit });
   }
 
   for (const key of REQUIRED_NUTRIENTS) {
     if (seen.has(key)) continue;
     if (key === 'energy' && file.label.nutrients.some((n) => n.key.trim() === 'energy' && normalizeUnit(n.unit) === 'kJ')) {
       problems.push('energy: the label states energy in kJ only; kcal is required and kJ is never converted (needs an approved policy)');
-    } else if (key === 'carbohydrate' && file.label.carbohydrate_definition !== 'total') {
-      problems.push(`carbohydrate: total carbohydrate is required; the label states ${file.label.carbohydrate_definition} carbohydrate (needs an approved policy)`);
+    } else if (key === 'carbohydrate' && file.label.carbohydrate_definition === 'not_stated') {
+      problems.push('carbohydrate: required, and the label must say whether it is total or available carbohydrate (it is never inferred, e.g. from the market)');
     } else {
       problems.push(`${key}: required by the initial publication policy but not stated (a stated 0 is accepted; a missing value is never invented)`);
     }

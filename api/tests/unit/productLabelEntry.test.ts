@@ -122,8 +122,55 @@ describe('nutrients (K, L, M, N, O)', () => {
     expect(plan.notMapped).toEqual(['energy 628 kJ: no approved kJ to kcal conversion']);
   });
 
-  it('does not map "available" carbohydrate to total carbohydrate', () => {
-    expect(problems(withLabel({ carbohydrate_definition: 'available' }))).toMatch(/total carbohydrate is required; the label states available/);
+  it('A: a US "Total Carbohydrate" label is stored as carbohydrate (total)', () => {
+    const plan = buildLabelPlan(base());
+    expect(plan.label.nutrients.map((n) => n.key)).toContain('carbohydrate');
+    expect(plan.label.nutrients.map((n) => n.key)).not.toContain('available_carbohydrate');
+  });
+
+  it('B/C: an EU/UK available-carbohydrate label is stored as available_carbohydrate only, never as carbohydrate', () => {
+    const plan = buildLabelPlan(withLabel({ carbohydrate_definition: 'available' }));
+    const keys = plan.label.nutrients.map((n) => n.key);
+    expect(keys).toContain('available_carbohydrate');
+    expect(keys).not.toContain('carbohydrate');
+    expect(plan.label.nutrients.find((n) => n.key === 'available_carbohydrate')).toEqual({ key: 'available_carbohydrate', amount: 4, basis_quantity: 100, basis_unit: 'g' });
+    // and no total is computed from available carbohydrate + fibre
+    const withFiber = withLabel({ carbohydrate_definition: 'available' });
+    (withFiber.label.nutrients as unknown[]).push({ key: 'fiber', amount: 3, unit: 'g' });
+    expect(buildLabelPlan(withFiber).label.nutrients.map((n) => n.key)).not.toContain('carbohydrate');
+  });
+
+  it('refuses a carbohydrate whose definition is not stated (never inferred from the market)', () => {
+    expect(problems(withLabel({ carbohydrate_definition: 'not_stated' }))).toMatch(/must say whether it is total or available/);
+  });
+
+  it('refuses writing available_carbohydrate directly (one way to declare the carbohydrate line)', () => {
+    const b = base();
+    (b.label.nutrients as unknown[]).push({ key: 'available_carbohydrate', amount: 4, unit: 'g' });
+    expect(problems(b)).toMatch(/declare its meaning with label.carbohydrate_definition/);
+  });
+
+  it('D/E/G: total sugars, added sugars and saturated fat are stored as stated, separately; zeros kept, missing absent', () => {
+    const b = base();
+    (b.label.nutrients as unknown[]).push({ key: 'total_sugars', amount: 4.6, unit: 'g' }, { key: 'added_sugars', amount: 0, unit: 'g' }, { key: 'saturated_fat', amount: 3, unit: 'g' });
+    const by = Object.fromEntries(buildLabelPlan(b).label.nutrients.map((n) => [n.key, n.amount]));
+    expect(by).toMatchObject({ total_sugars: 4.6, added_sugars: 0, saturated_fat: 3, fat: 0 });
+    const onlyTotal = base();
+    (onlyTotal.label.nutrients as unknown[]).push({ key: 'total_sugars', amount: 4.6, unit: 'g' });
+    const keys = buildLabelPlan(onlyTotal).label.nutrients.map((n) => n.key);
+    expect(keys).toContain('total_sugars');
+    expect(keys).not.toContain('added_sugars'); // never inferred
+    expect(keys).not.toContain('saturated_fat'); // never derived from fat
+  });
+
+  it('F: salt is never stored or converted to sodium; stated sodium stays authoritative', () => {
+    const b = base();
+    (b.label.nutrients as unknown[]).push({ key: 'Salt', amount: 1, unit: 'g' });
+    const plan = buildLabelPlan(b);
+    expect(plan.label.nutrients.map((n) => n.key)).not.toContain('sodium');
+    expect(plan.notMapped).toContain('Salt 1 g: not a canonical nutrient');
+    (b.label.nutrients as unknown[]).push({ key: 'sodium', amount: 400, unit: 'mg' });
+    expect(buildLabelPlan(b).label.nutrients.find((n) => n.key === 'sodium')?.amount).toBe(400);
   });
 
   it('reports non-canonical and review-required declarations as not stored; refuses a wrong unit', () => {
@@ -206,7 +253,8 @@ describe('authority and file guards (S, T)', () => {
     const text = readFileSync(EXAMPLE, 'utf8');
     const plan = buildLabelPlan(JSON.parse(text), text);
     expect(plan.synthetic).toBe(true);
-    expect(plan.notMapped).toHaveLength(3);
+    expect(plan.notMapped).toEqual(['energy 1590 kJ: no approved kJ to kcal conversion', 'Salt 0.8 g: not a canonical nutrient']);
+    expect(plan.label.nutrients.map((n) => n.key)).toEqual(expect.arrayContaining(['total_sugars', 'saturated_fat']));
   });
 
   it('the operator command is a dry run unless --apply with --confirm <gtin>', () => {
