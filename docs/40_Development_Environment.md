@@ -272,7 +272,7 @@ Expo Go covers the alpha. For the barcode camera (12B) and later native health i
 
 Update this table when a live run happens: record the date, and the device and OS for phone tests.
 
-Last live runs: 2026-10-01/02, 2026-10-10, 2026-10-16 and 2026-10-18 on DEV project `psundpxqgiknxnjudmxv` (Singapore), with the API on Render (Starter, Singapore, commit `d9ab3b7`).
+Last live runs: 2026-10-01/02, 2026-10-10, 2026-10-16, 2026-10-18 and 2026-10-19 on DEV project `psundpxqgiknxnjudmxv` (Singapore), with the API on Render (Starter, Singapore, commit `d9ab3b7`).
 
 | Area | Status | Evidence |
 |---|---|---|
@@ -286,11 +286,11 @@ Last live runs: 2026-10-01/02, 2026-10-10, 2026-10-16 and 2026-10-18 on DEV proj
 | Physical iPhone (iPhone 16 Pro, Expo Go SDK 57) | PARTIAL | sign-in, Today, food logging (12B) verified 2026-10-10; §7 items 5–10 not yet reported |
 | Physical Android | NOT TESTED | §7 checklist |
 | Mobile Food search, server preview, logging, Today refresh (12B) | LIVE VERIFIED (physical iPhone, 2026-10-10) | egg, rice, cottage cheese logged as User A; Today showed 3 meals, values Complete |
-| Mobile Product logging (12B) | NOT TESTED live | no Product reference data on DEV yet (mock + local real-API only) |
+| Mobile Product logging (12B) | LIVE VERIFIED (physical iPhone, 2026-10-19) | Heinz Mayonnaise Incredibly Light (`6290090018434`) scanned, shown as the MyRecipeBook Product and logged as 100 g through the barcode. The stored meal item names the Product and its current label version 1, with no generic Food and a server snapshot of 199 kcal / 17.5 g fat / 10 g carbohydrate. Today showed 1 meal, 199 kcal, 0.3 g protein, 10 g carbohydrate, 17.5 g fat, all Complete |
 | Mobile barcode camera (12B) | LIVE VERIFIED (physical iPhone, 2026-10-10) | real barcode read and looked up; "not found" as expected (no Products, no providers on DEV) |
 | Trusted USDA ingestion (12B.1) | LIVE VERIFIED | official SR Legacy 2018-04 file: DEV dry run, apply (179 foods, 596 servings, 3,724 values, 179 provenance), re-run unchanged; TLS verified with Supabase CA |
 | Reference Foods on DEV | LOADED (179, USDA SR Legacy) | migration 47 applied; A–O re-verified after 47 |
-| Reference Products on DEV | NONE | no Product ingestion yet |
+| Reference Products on DEV | 1 (operator label entry, 12B.2a) | Heinz Mayonnaise Incredibly Light 600 ml, AE: published 2026-10-19 from the physical label (dry run, then `--apply --confirm 06290090018434`); SQL verification: 1 Product, 1 active barcode, label v1 current, `manufacturer_label`, 6 nutrients per 100 g, 0 servings (the label's 15 ml serving is not stored: per-g basis, no density) |
 | Development build (EAS) | NOT TESTED | §8 |
 | Open Food Facts barcode lookup (Option A) | LIVE VERIFIED (2026-10-16) | §11: enabled through the 11C admin API; connection test healthy; `3017624010701` returned one unconfirmed, non-loggable, attributed candidate; product, barcode, label, nutrient, serving, raw_content, import_job and ai_extraction tables all still 0 (owner check); physical iPhone: 3 products found as candidates, 1 not found |
 | Private provider settings (migration 48) | LIVE VERIFIED (2026-10-18) | Order followed: Render variable `OPEN_FOOD_FACTS_CONTACT_EMAIL`, then API `b7a19d8`, then migration 48. SQL: routing columns `provider_key,priority,environment,configuration`, guard constraint present, 0 stored private values. Admin `status`: `private_settings contact_email configured: true`, no contact in configuration. Lookup `3017624010701` found an unconfirmed, non-loggable, attributed candidate; the routing function returned no email and no credential metadata; reference rows unchanged. The ordinary-user live lookup (User B) was not run because the password was unavailable; it is covered by `migration48.privateProviderSettings.test.ts`, and SQL confirms User B holds no platform_admin role |
