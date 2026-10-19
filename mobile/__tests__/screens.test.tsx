@@ -98,7 +98,7 @@ describe('Today / Daily Tracker (§24–25)', () => {
     expect(new URL(call.url).searchParams.get('timezone')).toBe('UTC');
 
     expect(screen.getByTestId('amount-energy_kcal')).toHaveTextContent('1,234.5 kcal');
-    expect(screen.getByTestId('coverage-protein_g')).toHaveTextContent('Partial: 2 of 3 items have data');
+    expect(screen.getByTestId('coverage-protein_g')).toHaveTextContent('Partial: 2 of 3 items have data, so the total may be higher');
     // Missing is never zero.
     expect(screen.getByTestId('amount-carbohydrate_g')).toHaveTextContent('Not available');
     expect(screen.getByTestId('coverage-carbohydrate_g')).toHaveTextContent('No data available');

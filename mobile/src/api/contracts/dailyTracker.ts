@@ -5,6 +5,7 @@
 import { z } from 'zod';
 
 import { coverageSchema, localDateSchema, roundedValueSchema } from './common';
+import { aggregateNutrientSchema } from './nutrition';
 
 export const SUMMARY_FIELDS = ['energy_kcal', 'protein_g', 'carbohydrate_g', 'fat_g', 'fiber_g'] as const;
 export type SummaryField = (typeof SUMMARY_FIELDS)[number];
@@ -55,6 +56,8 @@ export const dailyTrackerSchema = z.object({
     basis: z.enum(['recorded_snapshots', 'no_consumption']),
     summary: nutritionSummarySchema,
     item_count: z.number(),
+    /** Every nutrient of the day's recorded snapshots (Layer 12B.4 detail view). */
+    nutrients: z.array(aggregateNutrientSchema).default([]),
   }),
   target: z.object({
     status: z.enum(['current', 'daily_snapshot', 'historical_target_unavailable']),
@@ -71,7 +74,15 @@ export const dailyTrackerSchema = z.object({
   meal_groups: z.array(
     z.object({
       meal_type: z.string(),
-      meals: z.array(z.object({ id: z.string(), meal_type: z.string(), active_item_count: z.number() })),
+      meals: z.array(
+        z.object({
+          id: z.string(),
+          meal_type: z.string(),
+          active_item_count: z.number(),
+          /** The meal's own server totals (recorded snapshots of its active items). */
+          nutrition: z.object({ summary: nutritionSummarySchema, item_count: z.number() }).optional(),
+        }),
+      ),
     }),
   ),
 });

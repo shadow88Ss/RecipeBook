@@ -5,6 +5,12 @@
 // never 0). A no-consumption day shows the API's known zeros. The target line
 // preserves the API's context (live current target / saved daily snapshot /
 // historical target unavailable) and the comparison is the API's own.
+//
+// Layer 12B.4: below the summary, the day's meals (each with its own server
+// totals) and an expandable list of every nutrient in the day's recorded
+// snapshots. Total and available carbohydrate are separate rows; when some
+// items stated only available carbohydrate, a note says so instead of
+// letting a partial total look complete. Nothing is calculated on the device.
 
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
@@ -12,7 +18,7 @@ import { View } from 'react-native';
 
 import { SUMMARY_FIELDS, type DailyTracker } from '../../api/contracts/dailyTracker';
 import { getDailyTracker } from '../../api/endpoints';
-import { formatNumber, t } from '../../i18n';
+import { formatNumber, t, tp, type MessageKey } from '../../i18n';
 import { addDays, deviceTimeZone, localDate } from '../../lib/dates';
 import { useSelectedProfile } from '../../profile/ProfileProvider';
 import { canLogMeals } from '../../profile/scope';
@@ -20,6 +26,8 @@ import { useServices } from '../../state/AppProviders';
 import { queryKeys } from '../../state/queryClient';
 import { Button, Card, ErrorState, LoadingState, Screen, Text } from '../../ui';
 import { theme } from '../../ui/theme';
+import { availableCarbohydrateNoteNeeded, fromAggregate } from '../nutrition/display';
+import { NutritionDetails } from '../nutrition/NutritionDetails';
 import { comparisonText, coverageText, formatAmount, nutrientLabel, SUMMARY_UNITS, targetContextText } from './format';
 
 export function TodayScreen({ now = () => new Date(), timeZone, onLog }: { now?: () => Date; timeZone?: string; onLog?: () => void }) {
@@ -66,7 +74,9 @@ export function TrackerView({ tracker }: { tracker: DailyTracker }) {
           {t('today.noConsumption')}
         </Text>
       ) : (
-        <Text variant="muted">{t('today.meals', { count: tracker.meal_count })}</Text>
+        <Text variant="muted" testID="meal-count">
+          {tp('today.meals', tracker.meal_count)}
+        </Text>
       )}
       <Text variant="small" testID="target-context">
         {targetContextText(tracker.target.context)}
@@ -96,6 +106,37 @@ export function TrackerView({ tracker }: { tracker: DailyTracker }) {
         );
       })}
       {tracker.comparison.unmapped_targets.length ? <Text variant="small">{t('today.unmapped', { count: tracker.comparison.unmapped_targets.length })}</Text> : null}
+      {availableCarbohydrateNoteNeeded(tracker.actual.nutrients) ? (
+        <Text variant="small" testID="carb-note">
+          {t('today.carbNote')}
+        </Text>
+      ) : null}
+      {tracker.actual.basis === 'recorded_snapshots' ? <NutritionDetails rows={tracker.actual.nutrients.map(fromAggregate)} testID="day-details" /> : null}
+      <MealBreakdown tracker={tracker} />
+    </View>
+  );
+}
+
+/** The day's meals as the server grouped them, each with its own recorded totals. */
+function MealBreakdown({ tracker }: { tracker: DailyTracker }) {
+  const meals = tracker.meal_groups.flatMap((g) => g.meals);
+  if (!meals.length) return null;
+  return (
+    <View style={{ gap: theme.space.sm }} testID="meal-breakdown">
+      <Text variant="heading">{t('today.mealsTitle')}</Text>
+      {meals.map((meal) => {
+        const energy = meal.nutrition?.summary.energy_kcal;
+        const name = t(`meal.${meal.meal_type}` as MessageKey);
+        const items = tp('today.mealItems', meal.active_item_count);
+        const energyText = energy ? t('today.mealEnergy', { amount: formatAmount(energy, 'kcal'), coverage: coverageText(energy) }) : null;
+        return (
+          <Card key={meal.id} testID={`meal-${meal.id}`} accessibilityLabel={[name, items, energyText].filter(Boolean).join('. ')}>
+            <Text>{name}</Text>
+            <Text variant="small">{items}</Text>
+            {energyText ? <Text variant="small">{energyText}</Text> : null}
+          </Card>
+        );
+      })}
     </View>
   );
 }

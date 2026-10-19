@@ -4,6 +4,7 @@
 import type { ComparisonEntry, SummaryEntry, SummaryField, TargetContext } from '../../api/contracts/dailyTracker';
 import type { RoundedValue } from '../../api/contracts/common';
 import { formatNumber, t, type MessageKey } from '../../i18n';
+import { en } from '../../i18n/en';
 
 export const SUMMARY_UNITS: Record<SummaryField, string> = {
   energy_kcal: 'kcal',
@@ -59,7 +60,8 @@ export function comparisonText(entry: ComparisonEntry): string {
   }
 }
 
+/** Name for any server nutrient key; a key this app does not know gets a generic label. */
 export function nutrientLabel(nutrientKey: string): string {
-  const key = `nutrient.${nutrientKey}` as MessageKey;
-  return ['energy', 'protein', 'carbohydrate', 'fat', 'fiber'].includes(nutrientKey) ? t(key) : nutrientKey;
+  const key = `nutrient.${nutrientKey}`;
+  return key in en ? t(key as MessageKey) : t('nutrient.unknown', { key: nutrientKey.replace(/_/g, ' ') });
 }

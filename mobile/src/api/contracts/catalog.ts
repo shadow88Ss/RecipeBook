@@ -8,6 +8,7 @@ import { z } from 'zod';
 
 import { pageSchema } from './common';
 import { nutritionSummarySchema } from './dailyTracker';
+import { itemNutrientSchema } from './nutrition';
 
 /** docs/30_API.md §7 — the meal type enum of POST /v1/profiles/{id}/meals. */
 export const MEAL_TYPES = ['breakfast', 'lunch', 'dinner', 'snack', 'other'] as const;
@@ -77,7 +78,7 @@ export type ProductDetail = z.infer<typeof productDetailSchema>;
 
 /** POST /v1/nutrition/calculate — one Food item. */
 export const foodPreviewSchema = z.object({
-  items: z.array(z.object({ normalized_quantity: z.object({ status: z.string() }) })),
+  items: z.array(z.object({ normalized_quantity: z.object({ status: z.string() }), nutrients: z.array(itemNutrientSchema).default([]) })),
   summary: nutritionSummarySchema,
 });
 export type FoodPreview = z.infer<typeof foodPreviewSchema>;
@@ -86,8 +87,10 @@ export type FoodPreview = z.infer<typeof foodPreviewSchema>;
 export const PRODUCT_LABEL_STATUSES = ['authoritative_label', 'non_authoritative_label', 'no_label_version'] as const;
 export const productPreviewSchema = z.object({
   label_status: z.enum(PRODUCT_LABEL_STATUSES),
+  label_version: z.object({ version_number: z.number(), nutrition_source: z.string() }).nullable().optional(),
   normalized_quantity: z.object({ status: z.string() }),
   summary: nutritionSummarySchema,
+  nutrients: z.array(itemNutrientSchema).default([]),
 });
 export type ProductPreview = z.infer<typeof productPreviewSchema>;
 

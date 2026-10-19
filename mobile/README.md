@@ -173,6 +173,16 @@ There are three possible results:
 
 **Reference data.** Food and Product rows are global reference data written only by trusted ingestion, and no ingestion workflow exists yet. A new Supabase project therefore has no Foods or Products: searches return "No foods found…", and scans return "not found" (or an external candidate when providers are configured). Test fixtures exist only in the API test harness.
 
+### Nutrition display (Layer 12B.4)
+
+The five-field summary is unchanged. Below it, **Show nutrient details** expands every nutrient the API returned (Today: the day's recorded snapshots; Food and Product previews: the item), grouped as main nutrients, minerals, vitamins and other. The app calculates nothing:
+- **Total carbohydrate** (`carbohydrate`, includes fiber) and **available carbohydrate** (`available_carbohydrate`, excludes fiber) are separate rows. They are never added, substituted or converted. When some items stated only available carbohydrate, Today adds a note instead of letting a partial total look complete.
+- Each row states its completeness in words: complete, **stated as zero** (a known 0), **partial** ("1 of 2 items have data, so the total may be higher") or **not available**. A missing value is never shown as 0; unavailable nutrients are listed by name. Values below display precision read "less than 0.1 g".
+- Preview rows show their source (product label, reference database) where the API provides it, and Product previews show the label version.
+- A nutrient key the app does not know yet is still shown, as "Other nutrient (…)".
+- Today lists each meal with its item count and the meal's own server energy total. History is read from the recorded snapshots as returned, never recalculated.
+- Text comes from i18n keys (`nutrient.*`, `nutrition.*`), with plural forms via `tp()` ("1 meal logged").
+
 **Not in 12B:** correcting a logged item (the API's correction endpoint exists; the UI has no logged-item list to start from yet), Recipe, Meal Plan and Grocery UI, AI logging, health integrations.
 
 ## State

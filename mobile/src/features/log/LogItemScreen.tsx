@@ -26,6 +26,8 @@ import { useServices } from '../../state/AppProviders';
 import { invalidateAfterNutritionWrite, queryKeys } from '../../state/queryClient';
 import { Button, Card, Choice, ChoiceRow, ErrorState, Input, LoadingState, Notice, Screen, Text, errorMessage } from '../../ui';
 import { theme } from '../../ui/theme';
+import { fromItem, type NutrientDisplay } from '../nutrition/display';
+import { NutritionDetails } from '../nutrition/NutritionDetails';
 import { coverageText, formatAmount, nutrientLabel, SUMMARY_UNITS } from '../today/format';
 import { foodName, productLines } from './LogScreen';
 
@@ -45,6 +47,10 @@ interface Preview {
   summary: Record<(typeof SUMMARY_FIELDS)[number], SummaryEntry>;
   converted: boolean;
   labelStatus: 'non_authoritative_label' | 'no_label_version' | null;
+  /** Every nutrient the server returned for this amount (Layer 12B.4). */
+  details: NutrientDisplay[];
+  /** Product only: the label version the server used. */
+  labelVersion: number | null;
 }
 
 interface Item {
@@ -105,11 +111,19 @@ export function LogItemScreen({ target, onLogged, now = () => new Date(), timeZo
     queryKey: queryKeys.preview(target.kind, target.id, JSON.stringify(amount)),
     queryFn: ({ signal }): Promise<Preview> =>
       target.kind === 'food'
-        ? previewFoodNutrition(api, target.id, amount!, signal).then((p) => ({ summary: p.summary, converted: p.items[0]?.normalized_quantity.status === 'converted', labelStatus: null }))
+        ? previewFoodNutrition(api, target.id, amount!, signal).then((p) => ({
+            summary: p.summary,
+            converted: p.items[0]?.normalized_quantity.status === 'converted',
+            labelStatus: null,
+            details: (p.items[0]?.nutrients ?? []).map(fromItem),
+            labelVersion: null,
+          }))
         : previewProductNutrition(api, target.id, amount!, signal).then((p) => ({
             summary: p.summary,
             converted: p.normalized_quantity.status === 'converted',
             labelStatus: p.label_status === 'authoritative_label' ? null : p.label_status,
+            details: p.nutrients.map(fromItem),
+            labelVersion: p.label_status === 'authoritative_label' ? (p.label_version?.version_number ?? null) : null,
           })),
     enabled: !!item && !item.blocked && amount !== null,
   });
@@ -237,7 +251,13 @@ export function LogItemScreen({ target, onLogged, now = () => new Date(), timeZo
           {preview.isError ? <ErrorState error={preview.error} onRetry={() => void preview.refetch()} /> : null}
           {labelStatus ? <Notice testID="label-status">{t(`logItem.label.${labelStatus}`)}</Notice> : null}
           {notConverted ? <Notice testID="not-converted">{t('logItem.notConverted')}</Notice> : null}
+          {previewData?.labelVersion ? (
+            <Text variant="small" testID="label-version">
+              {t('logItem.labelVersion', { version: previewData.labelVersion })}
+            </Text>
+          ) : null}
           {previewData ? <SummaryView summary={previewData.summary} /> : null}
+          {previewData && previewData.converted ? <NutritionDetails rows={previewData.details} testID="preview-details" /> : null}
 
           {log.isError ? (
             <Text variant="error" testID="log-error">

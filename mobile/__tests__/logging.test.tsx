@@ -138,8 +138,8 @@ describe('Log item: amount, meal type, server preview and logging (Layer 12B)', 
     // The only serving is preselected with quantity 1; the server computes the preview.
     expect(await screen.findByTestId('nutrition-preview')).toBeTruthy();
     expect(screen.getByTestId('preview-energy_kcal')).toHaveTextContent(/Energy:\ 95\ kcal/);
-    expect(screen.getByTestId('preview-carbohydrate_g')).toHaveTextContent(/Carbohydrate:\ Not\ available/);
-    expect(screen.getByTestId('preview-fat_g')).toHaveTextContent(/Fat:\ 0\ g/);
+    expect(screen.getByTestId('preview-carbohydrate_g')).toHaveTextContent(/Total carbohydrate:\ Not\ available/);
+    expect(screen.getByTestId('preview-fat_g')).toHaveTextContent(/Total fat:\ 0\ g/);
     expect(apiCalls(server.calls, 'POST', /^\/v1\/nutrition\/calculate$/)[0]!.body).toEqual({ items: [{ food_id: FOOD, quantity: 1, serving_id: SERVING }] });
 
     await fireEvent.press(screen.getByTestId('log-submit'));

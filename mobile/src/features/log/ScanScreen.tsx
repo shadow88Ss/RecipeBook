@@ -15,7 +15,8 @@ import { useState, type ComponentType } from 'react';
 
 import { isApiError } from '../../api/errors';
 import { lookupBarcode, type BarcodeLookup, type ExternalCandidate } from '../../barcode/barcode';
-import { t } from '../../i18n';
+import { t, type MessageKey } from '../../i18n';
+import { en } from '../../i18n/en';
 import { useSelectedProfile } from '../../profile/ProfileProvider';
 import { canLogMeals } from '../../profile/scope';
 import { useServices } from '../../state/AppProviders';
@@ -123,10 +124,16 @@ function CandidateCard({ candidate }: { candidate: ExternalCandidate }) {
     <Card testID="barcode-candidate">
       <Text variant="heading">{t('scan.candidate.title')}</Text>
       <Text testID="candidate-name">{name}</Text>
-      <Notice testID="candidate-unconfirmed">{t('scan.candidate.body', { provider: attribution.text ?? candidate.provider_key })}</Notice>
+      <Notice testID="candidate-unconfirmed">{t('scan.candidate.body', { provider: providerName(candidate.provider_key) })}</Notice>
       {attribution.text ? <Text variant="small">{t('scan.candidate.attribution', { text: attribution.text })}</Text> : null}
       {attribution.licence ? <Text variant="small">{t('scan.candidate.licence', { licence: attribution.licence })}</Text> : null}
       {link ? <Text variant="small">{t('scan.candidate.link', { link })}</Text> : null}
     </Card>
   );
+}
+
+/** The provider's name for the notice; the full attribution text is shown on its own line. */
+export function providerName(providerKey: string): string {
+  const key = `provider.${providerKey}`;
+  return key in en ? t(key as MessageKey) : providerKey;
 }

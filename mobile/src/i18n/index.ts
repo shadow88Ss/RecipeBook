@@ -28,6 +28,18 @@ export function t(key: MessageKey, params: Record<string, string | number> = {})
   return template.replace(/\{\{(\w+)\}\}/g, (_, name: string) => (name in params ? String(params[name]) : `{{${name}}}`));
 }
 
+/** Plural-aware lookup: `<base>.one` / `<base>.other` by the locale's plural rules (with `count`). */
+export function tp(base: string, count: number, params: Record<string, string | number> = {}): string {
+  let category = 'other';
+  try {
+    category = new Intl.PluralRules(locale.tag).select(count);
+  } catch {
+    category = count === 1 ? 'one' : 'other';
+  }
+  const key = (`${base}.${category}` in en ? `${base}.${category}` : `${base}.other`) as MessageKey;
+  return t(key, { count, ...params });
+}
+
 /** Formats a server-provided number for display; never changes its value beyond display rounding. */
 export function formatNumber(value: number, maximumFractionDigits = 1): string {
   try {
