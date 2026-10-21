@@ -33,8 +33,10 @@ import {
   shoppingViewSchema,
   type GroceryListPage,
   type GroceryPreview,
+  type ManualItemInput,
   type ShoppingAmount,
   type ShoppingView,
+  type UserQuantity,
 } from './contracts/groceries';
 import {
   mealPlanDetailSchema,
@@ -250,9 +252,10 @@ export function getShoppingView(api: ApiClient, profileId: string, listId: strin
 export type ShoppingLine = { kind: 'item' | 'manual'; id: string };
 
 /**
- * Records a purchase on a generated or manual item. `amount` is the server's
- * own remaining_to_purchase, sent back as-is; without it the purchase is a
- * plain check-off. The server decides whether either form is accepted.
+ * Records a purchase on a generated or manual item: the server's own
+ * remaining_to_purchase sent back as-is, or (Layer 12F) an amount the user
+ * typed; without an amount it is a plain check-off. The server decides
+ * whether either form is accepted and how it counts.
  */
 export function recordPurchase(api: ApiClient, profileId: string, listId: string, line: ShoppingLine, amount: ShoppingAmount | null): Promise<ShoppingView> {
   const segment = line.kind === 'item' ? 'items' : 'manual-items';
@@ -282,4 +285,30 @@ export function getGroceryPreview(api: ApiClient, profileId: string, planId: str
 /** POST, no body — a new list generation from an active plan's confirmed items. */
 export function generateGroceryList(api: ApiClient, profileId: string, planId: string): Promise<{ id: string; generation_number: number }> {
   return api.request(`${planPath(profileId, planId)}/grocery-lists`, { method: 'POST', body: {}, schema: groceryListCreatedSchema });
+}
+
+// ---- Layer 12F — shopping state (§24). Every write answers with the new
+// shopping view; the server computes need, target and remaining. ------------
+
+const itemPath = (profileId: string, listId: string, itemId: string) => `${groceryListsPath(profileId)}/${encodeURIComponent(listId)}/items/${encodeURIComponent(itemId)}`;
+
+export type UserQuantityKind = 'already-have' | 'shopping-quantity';
+
+/** Sets what you already have, or the amount you intend to buy (revokes any previous value). */
+export function setItemQuantity(api: ApiClient, profileId: string, listId: string, itemId: string, kind: UserQuantityKind, value: UserQuantity): Promise<ShoppingView> {
+  return api.request(`${itemPath(profileId, listId, itemId)}/${kind}`, { method: 'POST', body: { quantity: value.quantity, unit: value.unit }, schema: shoppingViewSchema });
+}
+
+/** Revokes the active already-have or shopping quantity (kept as history). */
+export function clearItemQuantity(api: ApiClient, profileId: string, listId: string, itemId: string, kind: UserQuantityKind): Promise<ShoppingView> {
+  return api.request(`${itemPath(profileId, listId, itemId)}/${kind}/clear`, { method: 'POST', body: {}, schema: shoppingViewSchema });
+}
+
+export function addManualItem(api: ApiClient, profileId: string, listId: string, input: ManualItemInput): Promise<ShoppingView> {
+  return api.request(`${groceryListsPath(profileId)}/${encodeURIComponent(listId)}/manual-items`, { method: 'POST', body: input, schema: shoppingViewSchema });
+}
+
+/** Removes a manual item (revoked and kept as history, never deleted). */
+export function removeManualItem(api: ApiClient, profileId: string, listId: string, manualId: string): Promise<ShoppingView> {
+  return api.request(`${groceryListsPath(profileId)}/${encodeURIComponent(listId)}/manual-items/${encodeURIComponent(manualId)}/revoke`, { method: 'POST', body: {}, schema: shoppingViewSchema });
 }

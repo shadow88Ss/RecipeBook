@@ -45,6 +45,8 @@ export const shoppingItemSchema = z.object({
   generation_unresolved_reason: z.string().nullable(),
   generated_quantity: amountSchema.extend({ quantity_exact: z.string().nullable().optional() }).nullable(),
   already_have: z.object({ input: z.object({ quantity: z.number(), unit: z.string() }) }).nullable(),
+  /** Layer 12F — generated (the plan's need) or user_adjusted (a shopping quantity was set). */
+  shopping_target_source: z.string().nullable().optional(),
   ...progressFields,
   history: z.object({ purchases: z.array(purchaseRecordSchema) }),
 });
@@ -69,6 +71,10 @@ export const shoppingViewSchema = z.object({
     is_stale: z.boolean(),
     generated_at: z.string(),
     plan_context: z.object({ start_date: z.string(), end_date: z.string() }),
+    // Layer 12F — for regeneration and the "newer version" link.
+    meal_plan_id: z.string(),
+    superseded_by_grocery_list_id: z.string().nullable(),
+    current_plan_status: z.string(),
   }),
   /** The server's answer to "can state be recorded on this generation now". */
   state_writable: z.boolean(),
@@ -105,3 +111,18 @@ export type GroceryPreview = z.infer<typeof groceryPreviewSchema>;
 
 /** POST …/grocery-lists answers with the new generation; the app opens it by id. */
 export const groceryListCreatedSchema = z.object({ id: z.string(), generation_number: z.number() });
+
+/** Body for an already-have or shopping quantity: zero is allowed ("none" / "buy none"). */
+export interface UserQuantity {
+  quantity: number;
+  /** An exact unit code from the server's registry, or `count`. */
+  unit: string;
+}
+
+/** POST …/manual-items — quantity and unit together, or neither. */
+export interface ManualItemInput {
+  name: string;
+  quantity?: number;
+  unit?: string;
+  notes?: string | null;
+}

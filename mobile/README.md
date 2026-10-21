@@ -228,7 +228,14 @@ Layer 12C. Three areas under **More**, all reading the Profile's own data from t
 - On an active plan, `full_management` and `pediatric_weight_management` get **Make shopping list** (`POST …/grocery-lists` with an empty body), which opens the new list on the shopping screen. If a list exists, **Open shopping list** opens it; when the server says it is out of date, **Make a new version of the list** appears. `view_only` can open lists but not make them.
 - Plan writes refresh the preview.
 
-**Not in 12C–12F:** editing plan names, dates or item amounts; replacing confirmed items; completing, cancelling or archiving plans; plan target comparison and planned-vs-actual; already-have and shopping-quantity entry; adding or removing manual items; recipe version history and variants; deleting recipes (no API endpoint).
+**Shopping workflow (Layer 12F, `…/grocery-lists/{list}/…`, §24).** On a writable list, for scopes that record shopping:
+- **I already have…** (`POST …/already-have`, 0 allowed) and **Clear what I have**; **Change amount to buy** (`POST …/shopping-quantity`, 0 = buy none) and **Use the plan amount**. The amount is typed against the item's own unit (units of the same dimension; `count` for counts; any unit or `count` for an item without an amount).
+- **Bought <remaining>** sends the server's remaining amount; **Bought another amount** records a typed (partial) purchase; **Check off** for items without a quantity; **Undo** revokes the latest purchase.
+- **Add an item** (`POST …/manual-items`: a name, optionally an amount with a unit, notes) and **Remove** (revoked, kept as history).
+- The server answers each write with the new view: target, "To buy (your amount)", "Still to buy", status. Nothing is computed on the phone.
+- **Stale** current list: a notice, and (active plan) **Make a new version of the list** after a warning that recorded state is not copied (the server carries nothing forward) and this version becomes read-only. **Superseded** list: a notice, read-only, and **Open the newer version**.
+
+**Not in 12C–12F:** carry-forward of shopping state to a new list version (no approved policy on the server); per-item source detail; editing plan names, dates or item amounts; replacing confirmed items; completing, cancelling or archiving plans; plan target comparison and planned-vs-actual; already-have and shopping-quantity entry; adding or removing manual items; recipe version history and variants; deleting recipes (no API endpoint).
 
 ## State
 
