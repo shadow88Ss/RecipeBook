@@ -43,6 +43,7 @@ export function PlanItemScreen({ planId, mealId, onDone }: { planId: string; mea
     mutationFn: (item: PlannedItemInput) => addPlannedItems(api, profile.id, planId, mealId, [item]),
     onSuccess: (plan) => {
       client.setQueryData(queryKeys.mealPlan(profile.id, plan.id), plan);
+      void client.invalidateQueries({ queryKey: queryKeys.groceryPreview(profile.id, plan.id) });
       onDone();
     },
   });

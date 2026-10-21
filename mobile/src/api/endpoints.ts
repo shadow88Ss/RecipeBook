@@ -26,7 +26,16 @@ import {
 } from './contracts/catalog';
 import { dailyTrackerSchema, type DailyTracker } from './contracts/dailyTracker';
 import { profilePageSchema, type Profile, type ProfilePage } from './contracts/profile';
-import { groceryListPageSchema, shoppingViewSchema, type GroceryListPage, type ShoppingAmount, type ShoppingView } from './contracts/groceries';
+import {
+  groceryListCreatedSchema,
+  groceryListPageSchema,
+  groceryPreviewSchema,
+  shoppingViewSchema,
+  type GroceryListPage,
+  type GroceryPreview,
+  type ShoppingAmount,
+  type ShoppingView,
+} from './contracts/groceries';
 import {
   mealPlanDetailSchema,
   mealPlanPageSchema,
@@ -261,4 +270,16 @@ export function revokePurchase(api: ApiClient, profileId: string, listId: string
     body: {},
     schema: shoppingViewSchema,
   });
+}
+
+// ---- Layer 12F — Grocery list from a plan -----------------------------------
+
+/** What the plan needs to buy, derived on the server; nothing is stored. */
+export function getGroceryPreview(api: ApiClient, profileId: string, planId: string, signal?: AbortSignal): Promise<GroceryPreview> {
+  return api.request(`${planPath(profileId, planId)}/grocery-preview`, { schema: groceryPreviewSchema, signal });
+}
+
+/** POST, no body — a new list generation from an active plan's confirmed items. */
+export function generateGroceryList(api: ApiClient, profileId: string, planId: string): Promise<{ id: string; generation_number: number }> {
+  return api.request(`${planPath(profileId, planId)}/grocery-lists`, { method: 'POST', body: {}, schema: groceryListCreatedSchema });
 }

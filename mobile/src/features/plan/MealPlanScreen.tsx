@@ -33,9 +33,10 @@ import { theme } from '../../ui/theme';
 import { summaryCoverageText } from '../nutrition/SummaryCards';
 import { formatAmount } from '../today/format';
 import { planDatesText, planStatusText } from './MealPlansScreen';
+import { PlanGrocery } from './PlanGrocery';
 import { PlannedTotals } from './PlannedTotals';
 
-export function MealPlanScreen({ planId, onAddItem }: { planId: string; onAddItem?: (mealId: string) => void }) {
+export function MealPlanScreen({ planId, onAddItem, onOpenList }: { planId: string; onAddItem?: (mealId: string) => void; onOpenList?: (listId: string) => void }) {
   const profile = useSelectedProfile();
   const { api } = useServices();
   const query = useQuery({
@@ -46,7 +47,7 @@ export function MealPlanScreen({ planId, onAddItem }: { planId: string; onAddIte
     <Screen testID="plan-screen">
       {query.isPending ? <LoadingState /> : null}
       {query.isError ? <ErrorState error={query.error} onRetry={() => void query.refetch()} /> : null}
-      {query.data ? <PlanView plan={query.data} onAddItem={onAddItem} /> : null}
+      {query.data ? <PlanView plan={query.data} onAddItem={onAddItem} onOpenList={onOpenList} /> : null}
     </Screen>
   );
 }
@@ -84,12 +85,13 @@ function usePlanWrite(planId: string) {
     },
     onSuccess: async (plan, w) => {
       client.setQueryData(queryKeys.mealPlan(profile.id, plan.id), plan);
+      await client.invalidateQueries({ queryKey: queryKeys.groceryPreview(profile.id, plan.id) });
       if (w.kind === 'confirm') await client.invalidateQueries({ queryKey: queryKeys.mealPlans(profile.id) });
     },
   });
 }
 
-function PlanView({ plan, onAddItem }: { plan: MealPlanDetail; onAddItem?: (mealId: string) => void }) {
+function PlanView({ plan, onAddItem, onOpenList }: { plan: MealPlanDetail; onAddItem?: (mealId: string) => void; onOpenList?: (listId: string) => void }) {
   const profile = useSelectedProfile();
   const write = usePlanWrite(plan.id);
   const editable = !!onAddItem && canPlanMeals(profile.access_scope) && isPlanEditable(plan.status);
@@ -124,6 +126,7 @@ function PlanView({ plan, onAddItem }: { plan: MealPlanDetail; onAddItem?: (meal
         </View>
       ))}
       {edit ? <AddDay plan={plan} edit={edit} /> : null}
+      {onOpenList && isPlanEditable(plan.status) ? <PlanGrocery planId={plan.id} status={plan.status} onOpenList={onOpenList} /> : null}
     </View>
   );
 }

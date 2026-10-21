@@ -14,5 +14,11 @@ export default function MealPlan() {
       </Screen>
     );
   }
-  return <MealPlanScreen planId={id} onAddItem={(mealId) => router.push({ pathname: '/plan-item', params: { planId: id, mealId } })} />;
+  return (
+    <MealPlanScreen
+      planId={id}
+      onAddItem={(mealId) => router.push({ pathname: '/plan-item', params: { planId: id, mealId } })}
+      onOpenList={(listId) => router.push({ pathname: '/shopping', params: { id: listId } })}
+    />
+  );
 }

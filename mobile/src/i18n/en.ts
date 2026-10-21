@@ -410,6 +410,19 @@ export const en = {
   'planEdit.confirm': 'Confirm plan',
   'planEdit.confirmWarning': 'Confirming stores the nutrition of every unconfirmed item as it is now. Confirmed items cannot be changed or removed afterwards.',
   'planEdit.confirmYes': 'Yes, confirm',
+  // Layer 12F — a plan's grocery list.
+  'planGrocery.title': 'Grocery list',
+  'planGrocery.show': 'Show what to buy',
+  'planGrocery.hide': 'Hide what to buy',
+  'planGrocery.draftNote': 'This plan is not confirmed yet, so this is only a preview. Confirm the plan to make a shopping list.',
+  'planGrocery.excluded.one': '{{count}} item is not confirmed, so it is not included.',
+  'planGrocery.excluded.other': '{{count}} items are not confirmed, so they are not included.',
+  'planGrocery.open': 'Open shopping list',
+  'planGrocery.make': 'Make shopping list',
+  'planGrocery.remake': 'Make a new version of the list',
+  'planGrocery.previewDraft': 'Preview from the plan as it is now:',
+  'planGrocery.previewActive': 'From the confirmed items as they are now:',
+  'planGrocery.empty': 'Nothing to buy yet.',
 } as const;
 
 export type MessageKey = keyof typeof en;

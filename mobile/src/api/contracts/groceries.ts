@@ -76,3 +76,32 @@ export const shoppingViewSchema = z.object({
   manual_items: z.array(manualShoppingItemSchema),
 });
 export type ShoppingView = z.infer<typeof shoppingViewSchema>;
+
+// ---- Layer 12F — a plan's grocery preview and list generation ---------------
+
+/** One derived requirement; quantity/unit are null when the server could not resolve them. */
+export const groceryRequirementSchema = z.object({
+  display_name: z.string(),
+  quantity: z.number().nullable(),
+  unit: z.string().nullable(),
+  resolution_status: z.string(),
+  unresolved_reason: z.string().nullable(),
+});
+export type GroceryRequirement = z.infer<typeof groceryRequirementSchema>;
+
+/**
+ * GET …/meal-plans/{plan}/grocery-preview — nothing is stored. A draft plan
+ * previews its unconfirmed intent; an active plan previews exactly what a new
+ * generation would store, and names its current list.
+ */
+export const groceryPreviewSchema = z.object({
+  preview_type: z.string(),
+  includes_unconfirmed: z.boolean(),
+  current_grocery_list: z.object({ id: z.string(), generation_number: z.number(), is_stale: z.boolean() }).nullable(),
+  excluded_unconfirmed_sources: z.array(z.unknown()),
+  items: z.array(groceryRequirementSchema),
+});
+export type GroceryPreview = z.infer<typeof groceryPreviewSchema>;
+
+/** POST …/grocery-lists answers with the new generation; the app opens it by id. */
+export const groceryListCreatedSchema = z.object({ id: z.string(), generation_number: z.number() });

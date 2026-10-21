@@ -44,6 +44,8 @@ export const queryKeys = {
   mealPlan: (profileId: string, planId: string) => ['meal-plan', profileId, planId] as const,
   groceryLists: (profileId: string) => ['grocery-lists', profileId] as const,
   shopping: (profileId: string, listId: string) => ['shopping', profileId, listId] as const,
+  // Layer 12F
+  groceryPreview: (profileId: string, planId: string) => ['grocery-preview', profileId, planId] as const,
 } satisfies Record<string, (...args: never[]) => QueryKey>;
 
 /**

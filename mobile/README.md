@@ -223,7 +223,12 @@ Layer 12C. Three areas under **More**, all reading the Profile's own data from t
 - **Confirm plan** (after a second tap) is `POST …/confirm`: the server stores each draft/planned item's nutrition as it is now, and a draft plan becomes active. Confirmed items cannot be changed or removed.
 - Every write answers with the plan as the server has it, including its own live or confirmed nutrition; nothing is calculated on the phone.
 
-**Not in 12C–12E:** editing plan names, dates or item amounts; replacing confirmed items; completing, cancelling or archiving plans; generating a grocery list; plan target comparison and planned-vs-actual; already-have and shopping-quantity entry; adding or removing manual items; recipe version history and variants; deleting recipes (no API endpoint).
+**Grocery list from a plan (Layer 12F).** A draft or active plan has a **Grocery list** section (behind **Show what to buy**):
+- It shows the server's preview (`GET …/grocery-preview`; nothing is stored): each item with the server's amount, or "The amount could not be worked out from the plan". A draft plan's preview is labelled as unconfirmed; an active plan's covers confirmed items only and says how many are left out.
+- On an active plan, `full_management` and `pediatric_weight_management` get **Make shopping list** (`POST …/grocery-lists` with an empty body), which opens the new list on the shopping screen. If a list exists, **Open shopping list** opens it; when the server says it is out of date, **Make a new version of the list** appears. `view_only` can open lists but not make them.
+- Plan writes refresh the preview.
+
+**Not in 12C–12F:** editing plan names, dates or item amounts; replacing confirmed items; completing, cancelling or archiving plans; plan target comparison and planned-vs-actual; already-have and shopping-quantity entry; adding or removing manual items; recipe version history and variants; deleting recipes (no API endpoint).
 
 ## State
 
