@@ -5,7 +5,7 @@
 // leave the planned one as it is. The item is added as a draft and its
 // nutrition is the server's, calculated live until the plan is confirmed.
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { View } from 'react-native';
 
@@ -117,7 +117,15 @@ function RecipeItemForm({ onAdd, busy }: { onAdd: (item: PlannedItemInput) => vo
   const [servingsInput, setServingsInput] = useState('1');
   const [touched, setTouched] = useState(false);
 
-  const list = useQuery({ queryKey: queryKeys.recipes(profile.id, ''), queryFn: ({ signal }) => listRecipes(api, profile.id, {}, signal), enabled: !recipeId });
+  // Same key and shape as the Recipes list, so the two share one paged cache entry.
+  const list = useInfiniteQuery({
+    queryKey: queryKeys.recipes(profile.id, ''),
+    queryFn: ({ pageParam, signal }) => listRecipes(api, profile.id, { cursor: pageParam }, signal),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.pagination.nextCursor,
+    enabled: !recipeId,
+  });
+  const recipes = list.data?.pages.flatMap((p) => p.data) ?? [];
   const recipe = useQuery({ queryKey: queryKeys.recipe(profile.id, recipeId ?? ''), queryFn: ({ signal }) => getRecipe(api, profile.id, recipeId!, signal), enabled: !!recipeId });
 
   if (!recipeId) {
@@ -125,13 +133,16 @@ function RecipeItemForm({ onAdd, busy }: { onAdd: (item: PlannedItemInput) => vo
       <View style={{ gap: theme.space.sm }}>
         {list.isPending ? <LoadingState /> : null}
         {list.isError ? <ErrorState error={list.error} onRetry={() => void list.refetch()} /> : null}
-        {list.data && !list.data.data.length ? <EmptyState message={t('planEdit.noRecipes')} testID="plan-no-recipes" /> : null}
-        {list.data?.data.map((r) => (
+        {list.data && !recipes.length ? <EmptyState message={t('planEdit.noRecipes')} testID="plan-no-recipes" /> : null}
+        {recipes.map((r) => (
           <Row key={r.id} onPress={() => setRecipeId(r.id)} accessibilityLabel={r.title} testID={`pick-recipe-${r.id}`}>
             <Text>{r.title}</Text>
             <Text variant="small">{servingsText(r.servings)}</Text>
           </Row>
         ))}
+        {list.hasNextPage ? (
+          <Button label={t('common.loadMore')} variant="secondary" onPress={() => void list.fetchNextPage()} disabled={list.isFetchingNextPage} testID="plan-recipes-more" />
+        ) : null}
       </View>
     );
   }

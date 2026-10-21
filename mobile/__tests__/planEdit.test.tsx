@@ -10,6 +10,7 @@ import { MealPlanCreateScreen, planDatesError } from '../src/features/plan/MealP
 import { MealPlanScreen, missingDates } from '../src/features/plan/MealPlanScreen';
 import { MealPlansScreen } from '../src/features/plan/MealPlansScreen';
 import { PlanItemScreen } from '../src/features/plan/PlanItemScreen';
+import { RecipesScreen } from '../src/features/recipes/RecipesScreen';
 import { PROFILE_A, profileDto, profilePage, summaryEntry } from './helpers/fixtures';
 import { json, type Call } from './helpers/fakeServer';
 import { renderApp } from './helpers/renderApp';
@@ -296,6 +297,20 @@ describe('Adding items', () => {
     await fireEvent.press(await screen.findByTestId(`pick-recipe-${RECIPE}`));
     expect(await screen.findByTestId('plan-recipe-no-yield')).toBeTruthy();
     expect(screen.queryByTestId('plan-item-add')).toBeNull();
+  });
+
+  it('shares the Recipes list cache without breaking (phone bug in the first 12E build)', async () => {
+    await renderApp(
+      <>
+        <RecipesScreen onOpen={jest.fn()} />
+        <PlanItemScreen planId={PLAN} mealId="m1" onDone={jest.fn()} />
+      </>,
+      { routes: { 'GET /v1/profiles': profiles(), ...recipeRoutes(2) } },
+    );
+    await screen.findByTestId(`recipe-${RECIPE}`);
+    await fireEvent.press(screen.getByTestId('source-recipe'));
+    await fireEvent.press(await screen.findByTestId(`pick-recipe-${RECIPE}`));
+    expect(await screen.findByTestId('plan-recipe-version')).toBeTruthy();
   });
 
   it('shows the server’s refusal', async () => {
