@@ -15,6 +15,7 @@ The iOS and Android app for MyRecipeBook: React Native, Expo SDK 57, TypeScript 
 - [Today](#today)
 - [Progress](#progress)
 - [Log and barcode](#log-and-barcode)
+- [Recipes, meal plans and groceries](#recipes-meal-plans-and-groceries)
 - [State](#state)
 - [Secure storage](#secure-storage)
 - [Security rules](#security-rules)
@@ -35,7 +36,8 @@ mobile/
     auth/                supabase-js auth client, secure storage adapter, auth service, AuthProvider, OAuth browser
     api/                 the one API client, error mapping, endpoints, contracts/ (zod DTOs from docs/30_API.md)
     profile/             ProfileProvider (selection context) and scope labels
-    features/            screens: auth, profile, today, progress, log (search, log item, scan), misc (more, settings, placeholders)
+    features/            screens: auth, profile, today, progress, log (search, log item, scan), nutrition (shared display),
+                         recipes, plan, grocery, misc (more, settings)
     barcode/             barcode lookup contract and API call (the camera is features/log/CameraScanner)
     state/               services wiring, provider tree, TanStack Query client, navigation gate
     ui/                  theme and UI kit (Screen, Text, Button, Input, Card, Loading/Error/Empty, Notice)
@@ -110,7 +112,7 @@ The root layout (`src/app/_layout.tsx`) uses `Stack.Protected` guards driven by 
 
 - **Auth flow:** `sign-in`.
 - **Profile selection:** `select-profile` (signed in, no Profile chosen).
-- **App flow:** tabs for Today, Log, Progress, More and Profile. More opens Recipes, Meal plan and Grocery list, which are placeholders in this layer.
+- **App flow:** tabs for Today, Log, Progress, More and Profile. More opens Recipes, Meal plan and Grocery list (Layer 12C).
 
 ## Today
 
@@ -183,7 +185,31 @@ The five-field summary is unchanged. Below it, **Show nutrient details** expands
 - Today lists each meal with its item count and the meal's own server energy total. History is read from the recorded snapshots as returned, never recalculated.
 - Text comes from i18n keys (`nutrient.*`, `nutrition.*`), with plural forms via `tp()` ("1 meal logged").
 
-**Not in 12B:** correcting a logged item (the API's correction endpoint exists; the UI has no logged-item list to start from yet), Recipe, Meal Plan and Grocery UI, AI logging, health integrations.
+**Not in 12B:** correcting a logged item (the API's correction endpoint exists; the UI has no logged-item list to start from yet), Recipe, Meal Plan and Grocery UI (added in 12C), AI logging, health integrations.
+
+## Recipes, meal plans and groceries
+
+Layer 12C. Three areas under **More**, all reading the Profile's own data from the `/v1` API. The app calculates nothing: every value, total and status is the server's, and missing values read "Not available", never 0.
+
+**Recipes** (`GET /v1/profiles/{id}/recipes`, docs/30_API.md §17):
+- The list shows the Profile's recipes, newest first, with the yield. It uses the server's title search (`q`) and cursor paging ("Show more").
+- A recipe shows its current version ("Version 2 of 2"), yield, description, ingredients exactly as written, and steps.
+- **Nutrition** comes from `GET …/recipes/{id}/nutrition`. You can switch between **per serving** (the default) and **whole recipe**; both are the server's own values, and the app never divides. A version with no yield has no per-serving view and says so, so one serving is never assumed.
+- An ingredient the server could not count stays listed with the reason (not linked to a food, match not confirmed, no amount, no unit…). The totals then say "Partial: 1 of 2 ingredients have data, so the total may be higher".
+
+**Meal plans** (`GET /v1/profiles/{id}/meal-plans`, §21):
+- The list shows each plan's dates and status (Draft, Active, Completed, Cancelled, Archived).
+- A plan shows its days, then meals (type, time, notes), then items (Food or Recipe, with the planned amount: unit, serving or recipe servings) and each item's status.
+- Each day and meal shows the server's planned energy with its coverage, and the day's full five-field summary sits behind **Show planned totals**. A day with nothing planned says "Nothing planned", never 0 kcal.
+- When some items are unconfirmed, a notice says their nutrition is calculated live and can change. Cancelled, replaced and pending-replacement items stay listed and are marked "not counted in the totals".
+
+**Grocery lists** (`GET /v1/profiles/{id}/grocery-lists`, `…/{list}/shopping`, §23–24):
+- The list shows every generated list ("Groceries for 2026-10-20 to 2026-10-26 · List version 2"); a replaced generation is labelled.
+- The shopping view shows, per item, what the plan needs, already-have, what's left to buy, and the status in words. An amount the server could not work out says so.
+- **Bought <amount>** records a purchase of the server's own `remaining_to_purchase`, sent back unchanged. **Check off** records a plain check-off for an item with no quantity (unresolved or a manual item without an amount). **Undo** revokes the latest purchase still in effect; the server keeps it as history. Each write returns the new view, which replaces the cached one.
+- Write buttons appear only when the server says the list can take state (`state_writable`: the current generation of an active or completed plan) **and** the scope records shopping (`full_management`, `pediatric_weight_management`). Notices explain a replaced, stale or read-only list. The server enforces all of this regardless.
+
+**Not in 12C:** creating or editing recipes, plans or plan items; confirming plans; generating a grocery list; plan target comparison and planned-vs-actual; already-have and shopping-quantity entry; adding or removing manual items; recipe version history and variants.
 
 ## State
 

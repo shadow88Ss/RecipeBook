@@ -1,5 +1,8 @@
-import { PlaceholderScreen } from '../../features/misc/screens';
+import { useRouter } from 'expo-router';
 
-export default function Screen() {
-  return <PlaceholderScreen titleKey="more.grocery" testID="grocery-screen" />;
+import { GroceryListsScreen } from '../../features/grocery/GroceryListsScreen';
+
+export default function Grocery() {
+  const router = useRouter();
+  return <GroceryListsScreen onOpen={(id) => router.push({ pathname: '/shopping', params: { id } })} />;
 }

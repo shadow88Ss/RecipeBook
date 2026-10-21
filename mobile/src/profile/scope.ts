@@ -17,3 +17,14 @@ const MEAL_LOGGING_SCOPES: readonly string[] = ['full_management', 'pediatric_we
 export function canLogMeals(scope: string): boolean {
   return MEAL_LOGGING_SCOPES.includes(scope);
 }
+
+/**
+ * Scopes the API documents as allowed to record grocery shopping state
+ * (docs/30_API.md §24: full_management, pediatric_weight_management; view_only
+ * is read-only). Hides write UI only — the server still decides.
+ */
+const SHOPPING_WRITE_SCOPES: readonly string[] = ['full_management', 'pediatric_weight_management'];
+
+export function canRecordShopping(scope: string): boolean {
+  return SHOPPING_WRITE_SCOPES.includes(scope);
+}

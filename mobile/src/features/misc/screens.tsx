@@ -1,21 +1,12 @@
-// Layer 12A §19, §27 — shells for areas built in later layers, plus the
-// Profile/Settings and configuration-error screens.
+// Layer 12A §19, §27 — the More menu (Recipes, Meal plan and Grocery list,
+// built in Layer 12C), plus the Profile/Settings and configuration-error screens.
 
 import { useAuth } from '../../auth/AuthProvider';
-import { t, type MessageKey } from '../../i18n';
+import { t } from '../../i18n';
 import { useProfiles, useSelectedProfile } from '../../profile/ProfileProvider';
 import { scopeLabel } from '../../profile/scope';
 import { useServices } from '../../state/AppProviders';
 import { Button, Card, Screen, Text } from '../../ui';
-
-export function PlaceholderScreen({ titleKey, testID }: { titleKey: MessageKey; testID?: string }) {
-  return (
-    <Screen testID={testID}>
-      <Text variant="title">{t(titleKey)}</Text>
-      <Text variant="muted">{t('common.comingSoon')}</Text>
-    </Screen>
-  );
-}
 
 export function MoreScreen({ onOpen }: { onOpen: (area: 'recipes' | 'plan' | 'grocery') => void }) {
   return (

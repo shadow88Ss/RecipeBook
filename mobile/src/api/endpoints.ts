@@ -26,6 +26,7 @@ import {
 } from './contracts/catalog';
 import { dailyTrackerSchema, type DailyTracker } from './contracts/dailyTracker';
 import { profilePageSchema, type Profile, type ProfilePage } from './contracts/profile';
+import { groceryListPageSchema, shoppingViewSchema, type GroceryListPage, type ShoppingAmount, type ShoppingView } from './contracts/groceries';
 import { mealPlanDetailSchema, mealPlanPageSchema, type MealPlanDetail, type MealPlanPage } from './contracts/mealPlans';
 import { progressSchema, type Progress } from './contracts/progress';
 import { recipeDetailSchema, recipeNutritionSchema, recipePageSchema, type RecipeDetail, type RecipeNutrition, type RecipePage } from './contracts/recipes';
@@ -156,4 +157,44 @@ export function listMealPlans(api: ApiClient, profileId: string, cursor: string 
 
 export function getMealPlan(api: ApiClient, profileId: string, planId: string, signal?: AbortSignal): Promise<MealPlanDetail> {
   return api.request(`${mealPlansPath(profileId)}/${encodeURIComponent(planId)}`, { schema: mealPlanDetailSchema, signal });
+}
+
+// ---- Layer 12C — Grocery shopping -------------------------------------------
+
+export const GROCERY_PAGE_SIZE = 20;
+
+const groceryListsPath = (profileId: string) => `/v1/profiles/${encodeURIComponent(profileId)}/grocery-lists`;
+
+/** Every generation of every plan's list for the Profile. */
+export function listGroceryLists(api: ApiClient, profileId: string, cursor: string | null, signal?: AbortSignal): Promise<GroceryListPage> {
+  return api.request(groceryListsPath(profileId), { query: { cursor, limit: GROCERY_PAGE_SIZE }, schema: groceryListPageSchema, signal });
+}
+
+export function getShoppingView(api: ApiClient, profileId: string, listId: string, signal?: AbortSignal): Promise<ShoppingView> {
+  return api.request(`${groceryListsPath(profileId)}/${encodeURIComponent(listId)}/shopping`, { schema: shoppingViewSchema, signal });
+}
+
+export type ShoppingLine = { kind: 'item' | 'manual'; id: string };
+
+/**
+ * Records a purchase on a generated or manual item. `amount` is the server's
+ * own remaining_to_purchase, sent back as-is; without it the purchase is a
+ * plain check-off. The server decides whether either form is accepted.
+ */
+export function recordPurchase(api: ApiClient, profileId: string, listId: string, line: ShoppingLine, amount: ShoppingAmount | null): Promise<ShoppingView> {
+  const segment = line.kind === 'item' ? 'items' : 'manual-items';
+  return api.request(`${groceryListsPath(profileId)}/${encodeURIComponent(listId)}/${segment}/${encodeURIComponent(line.id)}/purchases`, {
+    method: 'POST',
+    body: amount ? { quantity: amount.quantity, unit: amount.unit } : {},
+    schema: shoppingViewSchema,
+  });
+}
+
+/** Undoes one purchase event (it is revoked and kept as history, never deleted). */
+export function revokePurchase(api: ApiClient, profileId: string, listId: string, purchaseId: string): Promise<ShoppingView> {
+  return api.request(`${groceryListsPath(profileId)}/${encodeURIComponent(listId)}/purchases/${encodeURIComponent(purchaseId)}/revoke`, {
+    method: 'POST',
+    body: {},
+    schema: shoppingViewSchema,
+  });
 }

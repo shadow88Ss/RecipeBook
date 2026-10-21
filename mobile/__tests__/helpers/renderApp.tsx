@@ -53,7 +53,8 @@ export async function renderApp(
   }
   const server = fakeFetch(opts.routes ?? {});
   const services = createServices({ ...TEST_CONFIG, ...opts.config }, { secureStore: store, fetch: server.fetch, supabaseFetch: server.fetch });
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+  // gcTime Infinity: no garbage-collection timers, so Jest can exit when a test file ends.
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity }, mutations: { gcTime: Infinity } } });
   let settle!: () => void;
   const authSettled = new Promise<void>((resolve) => {
     settle = resolve;
