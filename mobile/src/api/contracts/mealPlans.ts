@@ -72,3 +72,29 @@ export const mealPlanDetailSchema = z.object({
   days: z.array(z.object({ id: z.string(), plan_date: localDateSchema, meals: z.array(plannedMealSchema), nutrition: plannedNutritionSchema })),
 });
 export type MealPlanDetail = z.infer<typeof mealPlanDetailSchema>;
+
+// ---- Layer 12E — planning writes (request bodies; the server owns status,
+// confirmation and every nutrition value) ------------------------------------
+
+export interface MealPlanCreate {
+  name: string;
+  description: string | null;
+  start_date: string;
+  end_date: string;
+  /** IANA zone of the device; fixed once the plan leaves draft. */
+  local_timezone: string;
+}
+
+export type PlannedItemInput =
+  | { type: 'food'; food_id: string; quantity: number; unit: string }
+  | { type: 'food'; food_id: string; quantity: number; serving_id: string }
+  | { type: 'recipe'; recipe_id: string; recipe_version_id: string; servings: number };
+
+export interface PlannedMealCreate {
+  meal_type: string;
+  /** HH:MM in the plan's time zone. */
+  scheduled_local_time?: string;
+}
+
+/** PATCH …/items/{id} answers with the one item; the app re-reads the plan instead. */
+export const plannedItemWrittenSchema = z.object({ id: z.string() });

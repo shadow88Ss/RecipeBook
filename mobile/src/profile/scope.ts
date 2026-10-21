@@ -39,3 +39,14 @@ const RECIPE_WRITE_SCOPES: readonly string[] = ['full_management'];
 export function canManageRecipes(scope: string): boolean {
   return RECIPE_WRITE_SCOPES.includes(scope);
 }
+
+/**
+ * Scopes the API documents as allowed to write meal plans (docs/30_API.md
+ * §21: full_management, pediatric_weight_management; view_only reads). Hides
+ * write UI only — the server decides.
+ */
+const PLAN_WRITE_SCOPES: readonly string[] = ['full_management', 'pediatric_weight_management'];
+
+export function canPlanMeals(scope: string): boolean {
+  return PLAN_WRITE_SCOPES.includes(scope);
+}

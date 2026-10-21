@@ -216,7 +216,14 @@ Layer 12C. Three areas under **More**, all reading the Profile's own data from t
 - **Edit** is `PATCH …/recipes/{id}`, which saves a **new version**; the previous one stays unchanged. Only the changed fields are sent, plus `expected_current_version_id`, so if someone else saved a version in between, the edit is refused (409) and the app says to reopen the recipe. An unchanged ingredient list is not sent, so every stored line keeps its match state. Nothing changed means nothing is sent.
 - A stored line whose food was only *suggested* (`needs_confirmation`, from an import) is never sent with that food, because sending it would confirm the match. If the list changes, such lines are saved as text only, and the form warns first. Choosing a food for the line confirms a match explicitly.
 
-**Not in 12C/12D:** creating or editing plans or plan items; confirming plans; generating a grocery list; plan target comparison and planned-vs-actual; already-have and shopping-quantity entry; adding or removing manual items; recipe version history and variants; deleting recipes (no API endpoint).
+**Creating meal plans (Layer 12E).** `full_management` and `pediatric_weight_management` can plan, as the API allows; `view_only` reads only. Write controls appear only on draft and active plans.
+- **New meal plan** (on the list) asks for a name, the first and last day (YYYY-MM-DD, at most 366 days) and an optional description. The plan uses the device's time zone and starts as a draft.
+- On the plan: **Add a day** offers the dates in the range that have no day yet; **Add a meal** takes a meal type and an optional HH:MM time; **Add food or recipe** opens a screen to choose a Food from the server's search with an amount (a serving, or a quantity in a unit), or servings of one of the Profile's own recipes. A recipe item names the recipe's **current version** exactly, so later recipe edits do not change the plan. A recipe without a number of servings can't be planned.
+- **Remove from plan** cancels a draft or planned item (`PATCH status: cancelled`); it stays listed and isn't counted.
+- **Confirm plan** (after a second tap) is `POST …/confirm`: the server stores each draft/planned item's nutrition as it is now, and a draft plan becomes active. Confirmed items cannot be changed or removed.
+- Every write answers with the plan as the server has it, including its own live or confirmed nutrition; nothing is calculated on the phone.
+
+**Not in 12C–12E:** editing plan names, dates or item amounts; replacing confirmed items; completing, cancelling or archiving plans; generating a grocery list; plan target comparison and planned-vs-actual; already-have and shopping-quantity entry; adding or removing manual items; recipe version history and variants; deleting recipes (no API endpoint).
 
 ## State
 

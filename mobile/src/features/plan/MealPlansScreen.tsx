@@ -1,7 +1,7 @@
 // Layer 12C — Meal plans: the selected Profile's plans
 // (GET /v1/profiles/{id}/meal-plans), newest start date first, with cursor
-// paging. Read only: creating, editing and confirming plans are not in this
-// layer. A plan is planned intent; it is never shown as food eaten.
+// paging. A plan is planned intent; it is never shown as food eaten. Layer
+// 12E adds "New meal plan" for scopes that can plan.
 
 import { useInfiniteQuery } from '@tanstack/react-query';
 
@@ -10,11 +10,12 @@ import { listMealPlans } from '../../api/endpoints';
 import { en } from '../../i18n/en';
 import { t, type MessageKey } from '../../i18n';
 import { useSelectedProfile } from '../../profile/ProfileProvider';
+import { canPlanMeals } from '../../profile/scope';
 import { useServices } from '../../state/AppProviders';
 import { queryKeys } from '../../state/queryClient';
 import { Button, EmptyState, ErrorState, LoadingState, Row, Screen, Text } from '../../ui';
 
-export function MealPlansScreen({ onOpen }: { onOpen: (planId: string) => void }) {
+export function MealPlansScreen({ onOpen, onNew }: { onOpen: (planId: string) => void; onNew?: () => void }) {
   const profile = useSelectedProfile();
   const { api } = useServices();
   const query = useInfiniteQuery({
@@ -29,6 +30,7 @@ export function MealPlansScreen({ onOpen }: { onOpen: (planId: string) => void }
     <Screen testID="plans-screen">
       <Text variant="title">{t('plans.title')}</Text>
       <Text variant="muted">{profile.display_name}</Text>
+      {onNew && canPlanMeals(profile.access_scope) ? <Button label={t('planEdit.newTitle')} onPress={onNew} testID="new-plan" /> : null}
       {query.isPending ? <LoadingState /> : null}
       {query.isError ? <ErrorState error={query.error} onRetry={() => void query.refetch()} /> : null}
       {query.data && !plans.length ? <EmptyState message={t('plans.empty')} testID="plans-empty" /> : null}

@@ -27,7 +27,16 @@ import {
 import { dailyTrackerSchema, type DailyTracker } from './contracts/dailyTracker';
 import { profilePageSchema, type Profile, type ProfilePage } from './contracts/profile';
 import { groceryListPageSchema, shoppingViewSchema, type GroceryListPage, type ShoppingAmount, type ShoppingView } from './contracts/groceries';
-import { mealPlanDetailSchema, mealPlanPageSchema, type MealPlanDetail, type MealPlanPage } from './contracts/mealPlans';
+import {
+  mealPlanDetailSchema,
+  mealPlanPageSchema,
+  plannedItemWrittenSchema,
+  type MealPlanCreate,
+  type MealPlanDetail,
+  type MealPlanPage,
+  type PlannedItemInput,
+  type PlannedMealCreate,
+} from './contracts/mealPlans';
 import { progressSchema, type Progress } from './contracts/progress';
 import { recipeDetailSchema, recipeNutritionSchema, recipePageSchema, type RecipeDetail, type RecipeNutrition, type RecipePage, type RecipeWrite } from './contracts/recipes';
 
@@ -176,6 +185,42 @@ export function listMealPlans(api: ApiClient, profileId: string, cursor: string 
 
 export function getMealPlan(api: ApiClient, profileId: string, planId: string, signal?: AbortSignal): Promise<MealPlanDetail> {
   return api.request(`${mealPlansPath(profileId)}/${encodeURIComponent(planId)}`, { schema: mealPlanDetailSchema, signal });
+}
+
+// ---- Layer 12E — Meal plan writes --------------------------------------------
+// Each write answers with the whole plan as the server now has it, with its
+// own nutrition; the app shows that and computes nothing.
+
+const planPath = (profileId: string, planId: string) => `${mealPlansPath(profileId)}/${encodeURIComponent(planId)}`;
+
+/** POST — a new draft plan. */
+export function createMealPlan(api: ApiClient, profileId: string, plan: MealPlanCreate): Promise<MealPlanDetail> {
+  return api.request(mealPlansPath(profileId), { method: 'POST', body: plan, schema: mealPlanDetailSchema });
+}
+
+/** POST — one day of the plan's date range (once per date). */
+export function addPlanDay(api: ApiClient, profileId: string, planId: string, planDate: string): Promise<MealPlanDetail> {
+  return api.request(`${planPath(profileId, planId)}/days`, { method: 'POST', body: { plan_date: planDate }, schema: mealPlanDetailSchema });
+}
+
+/** POST — an empty planned meal on a day; items are added to it afterwards. */
+export function addPlannedMeal(api: ApiClient, profileId: string, planId: string, dayId: string, meal: PlannedMealCreate): Promise<MealPlanDetail> {
+  return api.request(`${planPath(profileId, planId)}/days/${encodeURIComponent(dayId)}/meals`, { method: 'POST', body: { ...meal, items: [] }, schema: mealPlanDetailSchema });
+}
+
+/** POST — items (a Food amount, or servings of an exact RecipeVersion) added to a meal as drafts. */
+export function addPlannedItems(api: ApiClient, profileId: string, planId: string, mealId: string, items: PlannedItemInput[]): Promise<MealPlanDetail> {
+  return api.request(`${planPath(profileId, planId)}/meals/${encodeURIComponent(mealId)}/items`, { method: 'POST', body: { items }, schema: mealPlanDetailSchema });
+}
+
+/** PATCH status=cancelled — takes a draft or planned item out of the plan (kept and listed, not counted). */
+export function cancelPlannedItem(api: ApiClient, profileId: string, planId: string, itemId: string): Promise<unknown> {
+  return api.request(`${planPath(profileId, planId)}/items/${encodeURIComponent(itemId)}`, { method: 'PATCH', body: { status: 'cancelled' }, schema: plannedItemWrittenSchema });
+}
+
+/** POST — confirms every draft/planned item: the server stores each one's nutrition snapshot. */
+export function confirmMealPlan(api: ApiClient, profileId: string, planId: string): Promise<MealPlanDetail> {
+  return api.request(`${planPath(profileId, planId)}/confirm`, { method: 'POST', body: {}, schema: mealPlanDetailSchema });
 }
 
 // ---- Layer 12C — Grocery shopping -------------------------------------------

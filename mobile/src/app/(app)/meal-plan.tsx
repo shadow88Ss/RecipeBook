@@ -1,10 +1,11 @@
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { MealPlanScreen } from '../../features/plan/MealPlanScreen';
 import { Screen, Text } from '../../ui';
 import { t } from '../../i18n';
 
 export default function MealPlan() {
+  const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
   if (!id) {
     return (
@@ -13,5 +14,5 @@ export default function MealPlan() {
       </Screen>
     );
   }
-  return <MealPlanScreen planId={id} />;
+  return <MealPlanScreen planId={id} onAddItem={(mealId) => router.push({ pathname: '/plan-item', params: { planId: id, mealId } })} />;
 }

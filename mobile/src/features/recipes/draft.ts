@@ -12,12 +12,10 @@
 //     text only, and the form says so first.
 
 import type { RecipeIngredient, RecipeIngredientInput, RecipeVersion, RecipeWrite } from '../../api/contracts/recipes';
+import type { FoodAmount } from '../food/FoodAmount';
 import { parseQuantity } from '../log/LogItemScreen';
 
-export type DraftAmount =
-  | { kind: 'unit'; quantity: number; unit: string }
-  | { kind: 'serving'; quantity: number; servingId: string; label: string | null }
-  | { kind: 'count'; quantity: number };
+export type DraftAmount = FoodAmount;
 
 export interface DraftIngredient {
   /** Local identity for list rendering only; never sent. */
