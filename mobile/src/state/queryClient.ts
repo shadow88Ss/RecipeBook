@@ -40,6 +40,8 @@ export const queryKeys = {
   recipes: (profileId: string, q: string) => ['recipes', profileId, q] as const,
   recipe: (profileId: string, recipeId: string) => ['recipe', profileId, recipeId] as const,
   recipeNutrition: (profileId: string, recipeId: string) => ['recipe-nutrition', profileId, recipeId] as const,
+  mealPlans: (profileId: string) => ['meal-plans', profileId] as const,
+  mealPlan: (profileId: string, planId: string) => ['meal-plan', profileId, planId] as const,
 } satisfies Record<string, (...args: never[]) => QueryKey>;
 
 /**

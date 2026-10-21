@@ -1,5 +1,8 @@
-import { PlaceholderScreen } from '../../features/misc/screens';
+import { useRouter } from 'expo-router';
 
-export default function Screen() {
-  return <PlaceholderScreen titleKey="more.plan" testID="plan-screen" />;
+import { MealPlansScreen } from '../../features/plan/MealPlansScreen';
+
+export default function Plans() {
+  const router = useRouter();
+  return <MealPlansScreen onOpen={(id) => router.push({ pathname: '/meal-plan', params: { id } })} />;
 }

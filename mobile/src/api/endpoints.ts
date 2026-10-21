@@ -26,6 +26,7 @@ import {
 } from './contracts/catalog';
 import { dailyTrackerSchema, type DailyTracker } from './contracts/dailyTracker';
 import { profilePageSchema, type Profile, type ProfilePage } from './contracts/profile';
+import { mealPlanDetailSchema, mealPlanPageSchema, type MealPlanDetail, type MealPlanPage } from './contracts/mealPlans';
 import { progressSchema, type Progress } from './contracts/progress';
 import { recipeDetailSchema, recipeNutritionSchema, recipePageSchema, type RecipeDetail, type RecipeNutrition, type RecipePage } from './contracts/recipes';
 
@@ -140,4 +141,19 @@ export function getRecipe(api: ApiClient, profileId: string, recipeId: string, s
 /** The current version's nutrition, calculated on the server, with each ingredient's status. */
 export function getRecipeNutrition(api: ApiClient, profileId: string, recipeId: string, signal?: AbortSignal): Promise<RecipeNutrition> {
   return api.request(`${recipesPath(profileId)}/${encodeURIComponent(recipeId)}/nutrition`, { schema: recipeNutritionSchema, signal });
+}
+
+// ---- Layer 12C — Meal plans (read) ------------------------------------------
+
+export const MEAL_PLAN_PAGE_SIZE = 20;
+
+const mealPlansPath = (profileId: string) => `/v1/profiles/${encodeURIComponent(profileId)}/meal-plans`;
+
+/** The Profile's plans, newest start date first. */
+export function listMealPlans(api: ApiClient, profileId: string, cursor: string | null, signal?: AbortSignal): Promise<MealPlanPage> {
+  return api.request(mealPlansPath(profileId), { query: { cursor, limit: MEAL_PLAN_PAGE_SIZE }, schema: mealPlanPageSchema, signal });
+}
+
+export function getMealPlan(api: ApiClient, profileId: string, planId: string, signal?: AbortSignal): Promise<MealPlanDetail> {
+  return api.request(`${mealPlansPath(profileId)}/${encodeURIComponent(planId)}`, { schema: mealPlanDetailSchema, signal });
 }
