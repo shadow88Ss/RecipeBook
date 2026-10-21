@@ -111,7 +111,7 @@ export function TrackerView({ tracker }: { tracker: DailyTracker }) {
           {t('today.carbNote')}
         </Text>
       ) : null}
-      {tracker.actual.basis === 'recorded_snapshots' ? <NutritionDetails rows={tracker.actual.nutrients.map(fromAggregate)} testID="day-details" /> : null}
+      {tracker.actual.basis === 'recorded_snapshots' ? <NutritionDetails rows={tracker.actual.nutrients.map((n) => fromAggregate(n))} testID="day-details" /> : null}
       <MealBreakdown tracker={tracker} />
     </View>
   );

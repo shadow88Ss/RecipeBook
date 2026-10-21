@@ -36,6 +36,10 @@ export const queryKeys = {
   units: () => ['units'] as const,
   preview: (kind: 'food' | 'product', id: string, amount: string) => ['nutrition-preview', kind, id, amount] as const,
   barcode: (code: string) => ['barcode', code] as const,
+  // Layer 12C — Recipe Book (profile-scoped).
+  recipes: (profileId: string, q: string) => ['recipes', profileId, q] as const,
+  recipe: (profileId: string, recipeId: string) => ['recipe', profileId, recipeId] as const,
+  recipeNutrition: (profileId: string, recipeId: string) => ['recipe-nutrition', profileId, recipeId] as const,
 } satisfies Record<string, (...args: never[]) => QueryKey>;
 
 /**

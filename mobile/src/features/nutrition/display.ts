@@ -62,11 +62,10 @@ function sourceText(source: string | undefined | null): string | null {
   return has(k) ? t('nutrition.sourceLine', { source: t(k) }) : null;
 }
 
-/** A nutrient of a day or meal total: completeness across its items. */
-export function fromAggregate(n: AggregateNutrient): NutrientDisplay {
+/** A nutrient of a day, meal or recipe total: completeness across its items (or, for a recipe, its ingredients). */
+export function fromAggregate(n: AggregateNutrient, partialKey: 'nutrition.state.partial' | 'recipes.state.partial' = 'nutrition.state.partial'): NutrientDisplay {
   const state: NutrientState = n.value === null ? 'unavailable' : n.coverage === 'partial' ? 'partial' : n.is_zero ? 'known_zero' : 'complete';
-  const stateText =
-    state === 'partial' ? t('nutrition.state.partial', { resolved: n.resolved_item_count, total: n.item_count }) : t(`nutrition.state.${state}`);
+  const stateText = state === 'partial' ? t(partialKey, { resolved: n.resolved_item_count, total: n.item_count }) : t(`nutrition.state.${state}`);
   return { key: n.nutrient_key, label: nutrientName(n.nutrient_key), hint: hint(n.nutrient_key), unit: n.unit, amountText: formatAmount(n, n.unit), state, stateText, sourceText: null, ...placement(n.nutrient_key) };
 }
 

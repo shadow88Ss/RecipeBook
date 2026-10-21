@@ -27,6 +27,7 @@ import {
 import { dailyTrackerSchema, type DailyTracker } from './contracts/dailyTracker';
 import { profilePageSchema, type Profile, type ProfilePage } from './contracts/profile';
 import { progressSchema, type Progress } from './contracts/progress';
+import { recipeDetailSchema, recipeNutritionSchema, recipePageSchema, type RecipeDetail, type RecipeNutrition, type RecipePage } from './contracts/recipes';
 
 /** Upper bound on profile pages followed; a household has far fewer. */
 export const MAX_PROFILE_PAGES = 10;
@@ -119,4 +120,24 @@ export function logMeal(
 
 export function getProgress(api: ApiClient, profileId: string, range: { from: string; to: string; timezone: string }, signal?: AbortSignal): Promise<Progress> {
   return api.request(`/v1/profiles/${encodeURIComponent(profileId)}/progress`, { query: range, schema: progressSchema, signal });
+}
+
+// ---- Layer 12C — Recipe Book (read) ----------------------------------------
+
+export const RECIPE_PAGE_SIZE = 20;
+
+const recipesPath = (profileId: string) => `/v1/profiles/${encodeURIComponent(profileId)}/recipes`;
+
+/** The Profile's own recipes, most recently updated first; `q` filters by title on the server. */
+export function listRecipes(api: ApiClient, profileId: string, opts: { q?: string; cursor?: string | null }, signal?: AbortSignal): Promise<RecipePage> {
+  return api.request(recipesPath(profileId), { query: { q: opts.q || undefined, cursor: opts.cursor, limit: RECIPE_PAGE_SIZE }, schema: recipePageSchema, signal });
+}
+
+export function getRecipe(api: ApiClient, profileId: string, recipeId: string, signal?: AbortSignal): Promise<RecipeDetail> {
+  return api.request(`${recipesPath(profileId)}/${encodeURIComponent(recipeId)}`, { schema: recipeDetailSchema, signal });
+}
+
+/** The current version's nutrition, calculated on the server, with each ingredient's status. */
+export function getRecipeNutrition(api: ApiClient, profileId: string, recipeId: string, signal?: AbortSignal): Promise<RecipeNutrition> {
+  return api.request(`${recipesPath(profileId)}/${encodeURIComponent(recipeId)}/nutrition`, { schema: recipeNutritionSchema, signal });
 }

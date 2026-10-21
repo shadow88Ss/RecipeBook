@@ -1,5 +1,8 @@
-import { PlaceholderScreen } from '../../features/misc/screens';
+import { useRouter } from 'expo-router';
 
-export default function Screen() {
-  return <PlaceholderScreen titleKey="more.recipes" testID="recipes-screen" />;
+import { RecipesScreen } from '../../features/recipes/RecipesScreen';
+
+export default function Recipes() {
+  const router = useRouter();
+  return <RecipesScreen onOpen={(id) => router.push({ pathname: '/recipe', params: { id } })} />;
 }
