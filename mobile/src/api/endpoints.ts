@@ -29,7 +29,7 @@ import { profilePageSchema, type Profile, type ProfilePage } from './contracts/p
 import { groceryListPageSchema, shoppingViewSchema, type GroceryListPage, type ShoppingAmount, type ShoppingView } from './contracts/groceries';
 import { mealPlanDetailSchema, mealPlanPageSchema, type MealPlanDetail, type MealPlanPage } from './contracts/mealPlans';
 import { progressSchema, type Progress } from './contracts/progress';
-import { recipeDetailSchema, recipeNutritionSchema, recipePageSchema, type RecipeDetail, type RecipeNutrition, type RecipePage } from './contracts/recipes';
+import { recipeDetailSchema, recipeNutritionSchema, recipePageSchema, type RecipeDetail, type RecipeNutrition, type RecipePage, type RecipeWrite } from './contracts/recipes';
 
 /** Upper bound on profile pages followed; a household has far fewer. */
 export const MAX_PROFILE_PAGES = 10;
@@ -142,6 +142,25 @@ export function getRecipe(api: ApiClient, profileId: string, recipeId: string, s
 /** The current version's nutrition, calculated on the server, with each ingredient's status. */
 export function getRecipeNutrition(api: ApiClient, profileId: string, recipeId: string, signal?: AbortSignal): Promise<RecipeNutrition> {
   return api.request(`${recipesPath(profileId)}/${encodeURIComponent(recipeId)}/nutrition`, { schema: recipeNutritionSchema, signal });
+}
+
+/** POST — creates the recipe and its version 1; the server stores and numbers everything. */
+export function createRecipe(api: ApiClient, profileId: string, recipe: RecipeWrite): Promise<RecipeDetail> {
+  return api.request(recipesPath(profileId), { method: 'POST', body: recipe, schema: recipeDetailSchema });
+}
+
+/**
+ * PATCH — writes a NEW version; the previous one is kept unchanged. Fields left
+ * out are carried over by the server (an unchanged ingredient list keeps each
+ * line's stored match state). `expectedVersionId` makes a concurrent edit a 409
+ * instead of a lost update.
+ */
+export function updateRecipe(api: ApiClient, profileId: string, recipeId: string, patch: Partial<RecipeWrite>, expectedVersionId: string): Promise<RecipeDetail> {
+  return api.request(`${recipesPath(profileId)}/${encodeURIComponent(recipeId)}`, {
+    method: 'PATCH',
+    body: { ...patch, expected_current_version_id: expectedVersionId },
+    schema: recipeDetailSchema,
+  });
 }
 
 // ---- Layer 12C — Meal plans (read) ------------------------------------------

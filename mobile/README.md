@@ -209,7 +209,14 @@ Layer 12C. Three areas under **More**, all reading the Profile's own data from t
 - **Bought <amount>** records a purchase of the server's own `remaining_to_purchase`, sent back unchanged. **Check off** records a plain check-off for an item with no quantity (unresolved or a manual item without an amount). **Undo** revokes the latest purchase still in effect; the server keeps it as history. Each write returns the new view, which replaces the cached one.
 - Write buttons appear only when the server says the list can take state (`state_writable`: the current generation of an active or completed plan) **and** the scope records shopping (`full_management`, `pediatric_weight_management`). Notices explain a replaced, stale or read-only list. The server enforces all of this regardless.
 
-**Not in 12C:** creating or editing recipes, plans or plan items; confirming plans; generating a grocery list; plan target comparison and planned-vs-actual; already-have and shopping-quantity entry; adding or removing manual items; recipe version history and variants.
+**Creating and editing recipes (Layer 12D).** Only `full_management` gets **New recipe** (on the list) and **Edit** (on a recipe); `view_only` and `pediatric_weight_management` read only, as the API allows. The server decides regardless.
+- The form has a title, the number of servings (decimals allowed, with a decimal comma; up to 1000), an optional description, ingredient lines, and steps. Missing or invalid fields are named before anything is sent.
+- **An ingredient line** is the text as you'd write it. It can be linked to a Food you pick from the server's search, which makes it a confirmed match, with an amount: a quantity of one of that Food's servings, or a quantity in a unit (g, ml, …). A line without a Food is kept as text only and is not counted in nutrition. Nothing is matched automatically, and lines can be reordered.
+- **Create** is `POST …/recipes` with exactly what was entered. The server numbers the lines and steps and calculates the nutrition.
+- **Edit** is `PATCH …/recipes/{id}`, which saves a **new version**; the previous one stays unchanged. Only the changed fields are sent, plus `expected_current_version_id`, so if someone else saved a version in between, the edit is refused (409) and the app says to reopen the recipe. An unchanged ingredient list is not sent, so every stored line keeps its match state. Nothing changed means nothing is sent.
+- A stored line whose food was only *suggested* (`needs_confirmation`, from an import) is never sent with that food, because sending it would confirm the match. If the list changes, such lines are saved as text only, and the form warns first. Choosing a food for the line confirms a match explicitly.
+
+**Not in 12C/12D:** creating or editing plans or plan items; confirming plans; generating a grocery list; plan target comparison and planned-vs-actual; already-have and shopping-quantity entry; adding or removing manual items; recipe version history and variants; deleting recipes (no API endpoint).
 
 ## State
 

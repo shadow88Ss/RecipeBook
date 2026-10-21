@@ -17,16 +17,17 @@ import { getRecipe, getRecipeNutrition } from '../../api/endpoints';
 import { en } from '../../i18n/en';
 import { t, type MessageKey } from '../../i18n';
 import { useSelectedProfile } from '../../profile/ProfileProvider';
+import { canManageRecipes } from '../../profile/scope';
 import { useServices } from '../../state/AppProviders';
 import { queryKeys } from '../../state/queryClient';
-import { Card, Choice, ChoiceRow, ErrorState, LoadingState, Notice, Screen, Text } from '../../ui';
+import { Button, Card, Choice, ChoiceRow, ErrorState, LoadingState, Notice, Screen, Text } from '../../ui';
 import { theme } from '../../ui/theme';
 import { fromAggregate } from '../nutrition/display';
 import { NutritionDetails } from '../nutrition/NutritionDetails';
 import { SummaryCards } from '../nutrition/SummaryCards';
 import { servingsText } from './RecipesScreen';
 
-export function RecipeScreen({ recipeId }: { recipeId: string }) {
+export function RecipeScreen({ recipeId, onEdit }: { recipeId: string; onEdit?: () => void }) {
   const profile = useSelectedProfile();
   const { api } = useServices();
   const recipe = useQuery({
@@ -58,6 +59,7 @@ export function RecipeScreen({ recipeId }: { recipeId: string }) {
       ) : null}
       {version ? (
         <>
+          {onEdit && canManageRecipes(profile.access_scope) ? <Button label={t('recipeEdit.edit')} variant="secondary" onPress={onEdit} testID="edit-recipe" /> : null}
           {version.description ? <Text>{version.description}</Text> : null}
           <Text testID="recipe-servings">{servingsText(version.servings)}</Text>
           {nutrition.isPending ? <LoadingState /> : null}

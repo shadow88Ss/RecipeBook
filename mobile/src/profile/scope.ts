@@ -28,3 +28,14 @@ const SHOPPING_WRITE_SCOPES: readonly string[] = ['full_management', 'pediatric_
 export function canRecordShopping(scope: string): boolean {
   return SHOPPING_WRITE_SCOPES.includes(scope);
 }
+
+/**
+ * Scopes the API documents as allowed to create and edit recipes
+ * (docs/30_API.md §17: full_management only; view_only and
+ * pediatric_weight_management read). Hides write UI only — the server decides.
+ */
+const RECIPE_WRITE_SCOPES: readonly string[] = ['full_management'];
+
+export function canManageRecipes(scope: string): boolean {
+  return RECIPE_WRITE_SCOPES.includes(scope);
+}

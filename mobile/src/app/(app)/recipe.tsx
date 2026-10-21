@@ -1,10 +1,11 @@
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { RecipeScreen } from '../../features/recipes/RecipeScreen';
 import { Screen, Text } from '../../ui';
 import { t } from '../../i18n';
 
 export default function Recipe() {
+  const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
   if (!id) {
     return (
@@ -13,5 +14,5 @@ export default function Recipe() {
       </Screen>
     );
   }
-  return <RecipeScreen recipeId={id} />;
+  return <RecipeScreen recipeId={id} onEdit={() => router.push({ pathname: '/recipe-edit', params: { id } })} />;
 }

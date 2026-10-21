@@ -1,8 +1,8 @@
 // Layer 12C — Recipe Book list: the selected Profile's own recipes
 // (GET /v1/profiles/{id}/recipes), most recently updated first, with the
-// server's title search and cursor paging. Read only: creating and editing
-// recipes are not in this layer. Every scope that can read the Profile can
-// read its recipes; the server decides each request.
+// server's title search and cursor paging. Every scope that can read the
+// Profile can read its recipes; the server decides each request. Layer 12D
+// adds "New recipe" for scopes that can manage recipes.
 
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -11,11 +11,12 @@ import type { RecipeListItem } from '../../api/contracts/recipes';
 import { listRecipes } from '../../api/endpoints';
 import { formatNumber, t, tp } from '../../i18n';
 import { useSelectedProfile } from '../../profile/ProfileProvider';
+import { canManageRecipes } from '../../profile/scope';
 import { useServices } from '../../state/AppProviders';
 import { queryKeys } from '../../state/queryClient';
 import { Button, EmptyState, ErrorState, Input, LoadingState, Row, Screen, Text } from '../../ui';
 
-export function RecipesScreen({ onOpen }: { onOpen: (recipeId: string) => void }) {
+export function RecipesScreen({ onOpen, onNew }: { onOpen: (recipeId: string) => void; onNew?: () => void }) {
   const profile = useSelectedProfile();
   const { api } = useServices();
   const [text, setText] = useState('');
@@ -35,6 +36,7 @@ export function RecipesScreen({ onOpen }: { onOpen: (recipeId: string) => void }
     <Screen testID="recipes-screen">
       <Text variant="title">{t('recipes.title')}</Text>
       <Text variant="muted">{profile.display_name}</Text>
+      {onNew && canManageRecipes(profile.access_scope) ? <Button label={t('recipeEdit.newTitle')} onPress={onNew} testID="new-recipe" /> : null}
       <Input
         label={t('recipes.searchLabel')}
         value={text}

@@ -27,6 +27,7 @@ export const recipeIngredientSchema = z.object({
   /** The line as the user wrote it — immutable provenance. */
   text: z.string(),
   food_id: z.string().nullable(),
+  serving_id: z.string().nullable().optional(),
   quantity: z.number().nullable(),
   unit: z.string().nullable(),
   match_status: z.string(),
@@ -80,3 +81,22 @@ export const recipeDetailSchema = z.object({
   current_version: recipeVersionSchema.nullable(),
 });
 export type RecipeDetail = z.infer<typeof recipeDetailSchema>;
+
+// ---- Layer 12D — create and edit (new version) -----------------------------
+
+/**
+ * One ingredient line as sent to POST/PATCH (docs/30_API.md §17). `text` is
+ * the line as written. `food_id` is a Food the user chose, a confirmed match;
+ * without it the line is kept as text only. The amount is quantity + unit,
+ * quantity + serving_id (a serving of that Food), quantity alone (a count),
+ * or nothing. Server-owned fields (match state, order numbers) are never sent.
+ */
+export type RecipeIngredientInput = { text: string; food_id?: string; serving_id?: string; quantity?: number; unit?: string };
+
+export interface RecipeWrite {
+  title: string;
+  description: string | null;
+  servings: number;
+  ingredients: RecipeIngredientInput[];
+  instructions: string[];
+}
