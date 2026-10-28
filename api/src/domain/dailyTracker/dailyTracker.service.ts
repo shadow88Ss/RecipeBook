@@ -34,6 +34,7 @@ import type { AuthContext } from '../../types/express';
 import { CONVERSION_VERSION, ROUNDING_MODE } from '../conversion/conversion.engine';
 import { ZERO } from '../conversion/decimal';
 import { findDailySnapshot, IMPLEMENTED_SOURCES, RESOLVER_VERSION, type EffectiveTargetService } from '../effectiveTarget/effectiveTarget.service';
+import { loadFoodDisplayNames } from '../foods/foodDisplayName';
 import { MEAL_ITEM_COLUMNS, MEAL_LOG_COLUMNS, isActive, toMealItemDto, toMealNutritionDto, type MealItemRow, type MealLogRow } from '../meals/meal.dto';
 import { MEAL_READ_SCOPES } from '../meals/meal.service';
 import { MEAL_TYPES } from '../meals/meal.schemas';
@@ -84,6 +85,7 @@ export class DailyTrackerService {
           limit: IN_MEMORY_PAGE_FETCH_CAP,
         })
       : [];
+    const names = await loadFoodDisplayNames(db, items.filter(isActive).map((i) => i.food_id));
     const active = items.filter(isActive);
 
     // Actual intake: recorded snapshots only.
@@ -165,7 +167,7 @@ export class DailyTrackerService {
                 notes: log.notes,
                 created_at: log.created_at,
                 active_item_count: nutrition.active_item_ids.length,
-                items: mealItems.filter(isActive).map((i) => toMealItemDto(i)),
+                items: mealItems.filter(isActive).map((i) => toMealItemDto(i, { detail: false }, names)),
                 nutrition: { summary: nutrition.summary, item_count: nutrition.item_count, coverage_summary: nutrition.coverage_summary },
               };
             }),

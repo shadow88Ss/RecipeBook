@@ -30,6 +30,7 @@ import { useServices } from '../../state/AppProviders';
 import { queryKeys } from '../../state/queryClient';
 import { Button, Card, Choice, ChoiceRow, ErrorState, Input, LoadingState, Notice, Screen, Text, errorMessage } from '../../ui';
 import { theme } from '../../ui/theme';
+import { readableFoodName } from '../food/foodName';
 import { summaryCoverageText } from '../nutrition/SummaryCards';
 import { formatAmount } from '../today/format';
 import { planDatesText, planStatusText } from './MealPlansScreen';
@@ -243,7 +244,7 @@ function MealCard({ meal, edit }: { meal: PlannedMeal; edit: Edit | null }) {
 
 export function plannedItemName(item: PlannedItem): string {
   if (item.source_type === 'recipe') return item.recipe?.title ?? t('plans.item.recipe');
-  return item.food?.canonical_name ?? t('plans.item.food');
+  return readableFoodName(item.food?.display_name, item.food?.canonical_name, t('plans.item.food'));
 }
 
 export function plannedAmountText(item: PlannedItem): string {

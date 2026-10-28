@@ -22,6 +22,9 @@ export type GroceryListSummary = z.infer<typeof groceryListSummarySchema>;
 export const groceryListPageSchema = pageSchema(groceryListSummarySchema);
 export type GroceryListPage = z.infer<typeof groceryListPageSchema>;
 
+/** A grocery line's Food: `display_name` is its alias, resolved when read (Layer 12F); null when it has none. */
+const groceryFoodSchema = z.object({ food_id: z.string(), display_name: z.string().nullable().optional() }).nullable().optional();
+
 const amountSchema = z.object({ quantity: z.number(), unit: z.string() });
 export type ShoppingAmount = z.infer<typeof amountSchema>;
 
@@ -40,7 +43,9 @@ const progressFields = {
 
 export const shoppingItemSchema = z.object({
   grocery_list_item_id: z.string(),
+  /** The generation's stored name; for a Food this is its internal key. Prefer food.display_name. */
   display_name: z.string(),
+  food: groceryFoodSchema,
   generation_resolution_status: z.string(),
   generation_unresolved_reason: z.string().nullable(),
   generated_quantity: amountSchema.extend({ quantity_exact: z.string().nullable().optional() }).nullable(),
@@ -88,6 +93,7 @@ export type ShoppingView = z.infer<typeof shoppingViewSchema>;
 /** One derived requirement; quantity/unit are null when the server could not resolve them. */
 export const groceryRequirementSchema = z.object({
   display_name: z.string(),
+  food: groceryFoodSchema,
   quantity: z.number().nullable(),
   unit: z.string().nullable(),
   resolution_status: z.string(),

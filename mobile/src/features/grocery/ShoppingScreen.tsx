@@ -46,6 +46,7 @@ import { useServices } from '../../state/AppProviders';
 import { queryKeys } from '../../state/queryClient';
 import { Button, Card, Choice, ChoiceRow, ErrorState, Input, LoadingState, Notice, Screen, Text, errorMessage } from '../../ui';
 import { theme } from '../../ui/theme';
+import { readableFoodName } from '../food/foodName';
 import { OFFERED_UNITS } from '../log/LogItemScreen';
 import { listTitle } from './GroceryListsScreen';
 
@@ -177,6 +178,14 @@ function Regenerate({ planId, onOpenList }: { planId: string; onOpenList: (listI
       ) : null}
     </Card>
   );
+}
+
+/**
+ * A generated line's name: for a Food, its display name, else the stored name
+ * unless that is an internal key; a line without a Food keeps its own text.
+ */
+export function groceryItemName(item: { display_name: string; food?: { display_name?: string | null } | null }): string {
+  return item.food ? readableFoodName(item.food.display_name, item.display_name, t('plans.item.food')) : item.display_name;
 }
 
 /** "300 g", "2" (count) — the server's number with display rounding only. */
@@ -342,9 +351,12 @@ function ItemCard({ item, writable, busy, onAct }: { item: ShoppingItem; writabl
   const base = item.generated_quantity?.unit ?? item.shopping_target?.unit ?? null;
   const close = () => setEditing(null);
   const adjusted = item.shopping_target_source === 'user_adjusted';
+  const name = groceryItemName(item);
   return (
-    <Card testID={id} accessibilityLabel={`${item.display_name}. ${fromPlan}. ${shoppingStatusText(item.status)}`}>
-      <Text variant="heading">{item.display_name}</Text>
+    <Card testID={id} accessibilityLabel={`${name}. ${fromPlan}. ${shoppingStatusText(item.status)}`}>
+      <Text variant="heading" testID={`${id}-name`}>
+        {name}
+      </Text>
       <Text variant="small" testID={`${id}-plan`}>
         {fromPlan}
       </Text>

@@ -3,6 +3,7 @@
 // exposed.
 
 import { parseFraction, roundHalfUp } from '../conversion/decimal';
+import { displayNameOf, type FoodDisplayNames } from '../foods/foodDisplayName';
 import { GROCERY_DECIMAL_PLACES, type GroceryItem, type GrocerySourceLine } from './grocery.engine';
 
 export const GROCERY_LIST_COLUMNS =
@@ -101,11 +102,17 @@ export function toSourceDto(s: Omit<GrocerySourceLine, 'recipe_version_number' |
   };
 }
 
-export function toItemDto(item: Omit<GroceryItem, 'sources' | 'quantity'> & { id?: string; quantity: number | string | null }, sources: ReturnType<typeof toSourceDto>[]) {
+/**
+ * `names`: Food display names (FoodAlias), resolved when read. The stored
+ * `display_name` is what generation recorded and is returned unchanged; for a
+ * Food it is the canonical key (for USDA foods `usda-fdc:<fdcId>`), kept as
+ * provenance. Clients show `food.display_name` when it is not null.
+ */
+export function toItemDto(item: Omit<GroceryItem, 'sources' | 'quantity'> & { id?: string; quantity: number | string | null }, sources: ReturnType<typeof toSourceDto>[], names?: FoodDisplayNames) {
   return {
     ...(item.id ? { id: item.id } : {}),
     position: item.position,
-    food: item.food_id ? { food_id: item.food_id, canonical_name: item.display_name } : null,
+    food: item.food_id ? { food_id: item.food_id, canonical_name: item.display_name, display_name: displayNameOf(names, item.food_id) } : null,
     display_name: item.display_name,
     dimension: item.dimension,
     quantity: numberOrNull(item.quantity),

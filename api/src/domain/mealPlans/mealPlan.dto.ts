@@ -5,6 +5,7 @@ import { ZERO } from '../conversion/decimal';
 import type { AggregateNutrient, NutrientDefinition } from '../nutrition/nutrition.engine';
 import { toAggregateDto } from '../nutrition/nutrition.service';
 import { projectAggregateSummary } from '../nutrition/nutritionSummary';
+import { displayNameOf, type FoodDisplayNames } from '../foods/foodDisplayName';
 import { aggregateSnapshots, type MealItemSnapshot } from '../meals/meal.snapshot';
 
 export const MEAL_PLAN_COLUMNS = 'id, profile_id, name, description, start_date, end_date, local_timezone, status, created_at, updated_at';
@@ -113,14 +114,18 @@ export function nutritionView(snapshots: readonly MealItemSnapshot[], detail: bo
   };
 }
 
-export function toPlannedItemDto(item: PlannedItemRow, snapshot: MealItemSnapshot, options: { detail: boolean } = { detail: false }) {
+/** `names`: Food display names (FoodAlias) for `food.display_name`; canonical_name stays as provenance. */
+export function toPlannedItemDto(item: PlannedItemRow, snapshot: MealItemSnapshot, options: { detail: boolean } = { detail: false }, names?: FoodDisplayNames) {
   const source = snapshot.source;
   const confirmed = item.status === 'confirmed';
   return {
     id: item.id,
     planned_meal_id: item.planned_meal_id,
     source_type: item.recipe_version_id !== null ? ('recipe' as const) : ('food' as const),
-    food: item.food_id !== null ? { food_id: item.food_id, canonical_name: source.type === 'food' ? source.canonical_name : null } : null,
+    food:
+      item.food_id !== null
+        ? { food_id: item.food_id, canonical_name: source.type === 'food' ? source.canonical_name : null, display_name: displayNameOf(names, item.food_id) }
+        : null,
     recipe:
       item.recipe_version_id !== null
         ? {
@@ -175,7 +180,7 @@ export function toMealPlanSummaryDto(plan: MealPlanRow) {
 }
 
 /** Full tree. Meal/day/plan nutrition cover CURRENT items only. */
-export function toMealPlanDetailDto(tree: PlanTree, snapshots: ReadonlyMap<string, MealItemSnapshot>, vocabulary: readonly NutrientDefinition[]) {
+export function toMealPlanDetailDto(tree: PlanTree, snapshots: ReadonlyMap<string, MealItemSnapshot>, vocabulary: readonly NutrientDefinition[], names?: FoodDisplayNames) {
   const snap = (item: PlannedItemRow) => {
     const s = snapshots.get(item.id);
     if (!s) throw new Error(`No nutrition for planned item ${item.id}.`);
@@ -199,7 +204,7 @@ export function toMealPlanDetailDto(tree: PlanTree, snapshots: ReadonlyMap<strin
             scheduled_local_time: meal.scheduled_local_time ? meal.scheduled_local_time.slice(0, 5) : null,
             notes: meal.notes,
             position: meal.position,
-            items: items.map((i) => toPlannedItemDto(i, snap(i))),
+            items: items.map((i) => toPlannedItemDto(i, snap(i), { detail: false }, names)),
             nutrition: nutritionView(items.filter(isCurrent).map(snap), false, vocabulary),
           };
         });

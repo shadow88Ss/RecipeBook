@@ -23,6 +23,7 @@ import type { ScopedDbClient, ScopedDbFactory } from '../../lib/scopedDb';
 import type { AuthContext } from '../../types/express';
 import { compareToTarget, mapTargets } from '../dailyTracker/dailyTracker.comparison';
 import type { EffectiveTargetService } from '../effectiveTarget/effectiveTarget.service';
+import { loadFoodDisplayNames } from '../foods/foodDisplayName';
 import { buildFoodSnapshot, buildRecipeSnapshot, readSnapshot, type MealItemSnapshot } from '../meals/meal.snapshot';
 import { calculateItem, NUTRITION_CALCULATION_VERSION } from '../nutrition/nutrition.engine';
 import { loadNutrientVocabulary, loadNutritionReference, toAggregateDto } from '../nutrition/nutrition.service';
@@ -380,16 +381,16 @@ export class MealPlanService {
 
   private async detail(db: ScopedDbClient, profileId: string, planId: string) {
     const tree = await loadTree(db, profileId, planId);
-    const [snapshots, vocabulary] = await Promise.all([viewSnapshots(db, tree.items), loadNutrientVocabulary(db)]);
-    return toMealPlanDetailDto(tree, snapshots, vocabulary);
+    const [snapshots, vocabulary, names] = await Promise.all([viewSnapshots(db, tree.items), loadNutrientVocabulary(db), loadFoodDisplayNames(db, tree.items.map((i) => i.food_id))]);
+    return toMealPlanDetailDto(tree, snapshots, vocabulary, names);
   }
 
   private async itemDetail(db: ScopedDbClient, profileId: string, planId: string, itemId: string) {
     const tree = await loadTree(db, profileId, planId);
     const item = tree.items.find((i) => i.id === itemId);
     if (!item) throw AppError.notFound('Planned item not found.');
-    const snapshots = await viewSnapshots(db, [item]);
-    return toPlannedItemDto(item, snapshots.get(item.id) as MealItemSnapshot, { detail: true });
+    const [snapshots, names] = await Promise.all([viewSnapshots(db, [item]), loadFoodDisplayNames(db, [item.food_id])]);
+    return toPlannedItemDto(item, snapshots.get(item.id) as MealItemSnapshot, { detail: true }, names);
   }
 }
 

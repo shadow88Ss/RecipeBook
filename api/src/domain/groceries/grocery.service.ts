@@ -27,6 +27,7 @@ import { IN_MEMORY_PAGE_FETCH_CAP, paginateInMemory, type PaginationQuery } from
 import type { ScopedDbClient, ScopedDbFactory } from '../../lib/scopedDb';
 import type { AuthContext } from '../../types/express';
 import type { ReferenceSource, ServingReference } from '../conversion/conversion.engine';
+import { loadFoodDisplayNames } from '../foods/foodDisplayName';
 import { isCurrent, isPendingReplacement, type PlanTree } from '../mealPlans/mealPlan.dto';
 import { loadTree, PLAN_READ_SCOPES, PLAN_WRITE_SCOPES } from '../mealPlans/mealPlan.service';
 import { loadVersionContent } from '../recipes/recipe.service';
@@ -71,7 +72,8 @@ export class GroceryService {
     const derivation = await derive(db, planSources.sources);
     const fingerprint = sourceFingerprint(planSources.sources, derivation.recipeVersions);
     const active = status === 'active' ? await activeList(db, profileId, planId) : null;
-    const items = derivation.result.items.map((i) => toItemDto(i, i.sources.map((s, n) => toSourceDto(s, n))));
+    const names = await loadFoodDisplayNames(db, derivation.result.items.map((i) => i.food_id));
+    const items = derivation.result.items.map((i) => toItemDto(i, i.sources.map((s, n) => toSourceDto(s, n)), names));
     return {
       preview_type: status === 'draft' ? ('unconfirmed_plan_preview' as const) : ('active_plan_preview' as const),
       persisted: false as const,
@@ -154,6 +156,7 @@ export class GroceryService {
     const current = await loadPlanSources(db, tree, 'confirmed_only');
     const currentFingerprint = sourceFingerprint(current.sources, await loadRecipeVersions(db, current.sources));
     const mealType = new Map(tree.meals.map((m) => [m.id, m.meal_type]));
+    const names = await loadFoodDisplayNames(db, itemRows.map((i) => i.food_id));
     const items = [...itemRows]
       .sort((a, b) => a.position - b.position)
       .map((item) =>
@@ -163,6 +166,7 @@ export class GroceryService {
             .filter((s) => s.grocery_list_item_id === item.id)
             .sort((a, b) => a.position - b.position)
             .map((s) => toSourceDto({ ...s, meal_type: mealType.get(s.planned_meal_id) ?? null }, s.position)),
+          names,
         ),
       );
     return {

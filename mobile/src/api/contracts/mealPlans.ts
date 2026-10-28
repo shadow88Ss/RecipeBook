@@ -39,7 +39,8 @@ export type PlannedNutrition = z.infer<typeof plannedNutritionSchema>;
 export const plannedItemSchema = z.object({
   id: z.string(),
   source_type: z.enum(['food', 'recipe']),
-  food: z.object({ food_id: z.string(), canonical_name: z.string().nullable() }).nullable(),
+  /** canonical_name is an internal key (e.g. `usda-fdc:169228`), kept as provenance; display_name is the Food's alias (Layer 12F). */
+  food: z.object({ food_id: z.string(), canonical_name: z.string().nullable(), display_name: z.string().nullable().optional() }).nullable(),
   recipe: z.object({ recipe_id: z.string().nullable(), recipe_version_id: z.string(), version_number: z.number().nullable(), title: z.string().nullable() }).nullable(),
   amount: z.union([
     z.object({ servings: z.number() }),

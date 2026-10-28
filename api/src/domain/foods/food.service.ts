@@ -20,7 +20,8 @@ import type { AuthContext } from '../../types/express';
 import { convert, type ConversionResult, type FoodConversionData, type ReferenceSource } from '../conversion/conversion.engine';
 import type { FoodConversionInput } from '../conversion/conversion.schemas';
 import { authorityOf } from '../authority/authority';
-import { localeFallbackChain, localeRank, regionOfLocale } from './locale';
+import { compareAliases } from './foodDisplayName';
+import { localeFallbackChain, regionOfLocale } from './locale';
 import type {
   FoodAliasDto,
   FoodDetailDto,
@@ -126,14 +127,7 @@ export class FoodService {
       : [];
     const nutrientById = new Map(nutrients.map((n) => [n.id, n]));
 
-    const sortedAliases = [...aliases].sort(
-      (a, b) =>
-        localeRank(a.locale, chain) - localeRank(b.locale, chain) ||
-        Number(a.source === 'ai_matched') - Number(b.source === 'ai_matched') ||
-        Number(b.is_primary) - Number(a.is_primary) ||
-        compareText(a.alias_text, b.alias_text) ||
-        compareText(a.id, b.id),
-    );
+    const sortedAliases = [...aliases].sort(compareAliases(chain));
     const display = sortedAliases[0];
 
     // Region-specific servings for the caller's region first, then

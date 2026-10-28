@@ -3,6 +3,7 @@
 // Every nutrition figure here is derived from stored snapshots only.
 
 import { CONVERSION_VERSION, ROUNDING_MODE } from '../conversion/conversion.engine';
+import { displayNameOf, type FoodDisplayNames } from '../foods/foodDisplayName';
 import { NUTRITION_DECIMAL_PLACES } from '../nutrition/nutrition.engine';
 import { toAggregateDto } from '../nutrition/nutrition.service';
 import { projectAggregateSummary } from '../nutrition/nutritionSummary';
@@ -100,7 +101,8 @@ export function mealItemAmountDto(item: MealItemRow, source?: MealItemSnapshot['
   };
 }
 
-export function toMealItemDto(item: MealItemRow, options: { detail: boolean } = { detail: false }) {
+/** `names`: Food display names (FoodAlias) for `food.display_name`; the snapshot's canonical_name stays as provenance. */
+export function toMealItemDto(item: MealItemRow, options: { detail: boolean } = { detail: false }, names?: FoodDisplayNames) {
   const snapshot = snapshotOf(item);
   const source = snapshot?.source;
   return {
@@ -109,7 +111,7 @@ export function toMealItemDto(item: MealItemRow, options: { detail: boolean } = 
     source_type: sourceTypeOf(item),
     food:
       item.food_id !== null
-        ? { food_id: item.food_id, canonical_name: source?.type === 'food' ? source.canonical_name : null }
+        ? { food_id: item.food_id, canonical_name: source?.type === 'food' ? source.canonical_name : null, display_name: displayNameOf(names, item.food_id) }
         : null,
     recipe:
       item.recipe_version_id !== null
@@ -174,7 +176,7 @@ export function toMealNutritionDto(items: readonly MealItemRow[], options: { inc
   };
 }
 
-export function toMealLogDto(log: MealLogRow, items: readonly MealItemRow[]) {
+export function toMealLogDto(log: MealLogRow, items: readonly MealItemRow[], names?: FoodDisplayNames) {
   return {
     id: log.id,
     profile_id: log.profile_id,
@@ -186,7 +188,7 @@ export function toMealLogDto(log: MealLogRow, items: readonly MealItemRow[]) {
     updated_at: log.updated_at,
     item_count: items.length,
     active_item_count: items.filter(isActive).length,
-    items: items.map((i) => toMealItemDto(i)),
+    items: items.map((i) => toMealItemDto(i, { detail: false }, names)),
     nutrition: toMealNutritionDto(items, { includeNutrients: false }),
   };
 }

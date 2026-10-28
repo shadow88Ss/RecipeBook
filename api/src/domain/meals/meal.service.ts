@@ -26,6 +26,7 @@ import { AppError } from '../../lib/errors';
 import { IN_MEMORY_PAGE_FETCH_CAP, paginateInMemory, type PaginationQuery } from '../../lib/pagination';
 import type { ScopedDbClient, ScopedDbFactory } from '../../lib/scopedDb';
 import type { AuthContext } from '../../types/express';
+import { loadFoodDisplayNames } from '../foods/foodDisplayName';
 import { calculateItem, NUTRITION_CALCULATION_VERSION } from '../nutrition/nutrition.engine';
 import { loadNutritionReference } from '../nutrition/nutrition.service';
 import { loadRecipe, loadVersionContent, recipeVersionNutrition } from '../recipes/recipe.service';
@@ -136,7 +137,8 @@ export class MealService {
     const db = this.dbFactory.forUser(auth);
     await requireProfileScope(db, profileId, MEAL_READ_SCOPES);
     const log = await loadMealLog(db, profileId, mealLogId);
-    return toMealItemDto(await loadItem(db, log.id, itemId), { detail: true });
+    const item = await loadItem(db, log.id, itemId);
+    return toMealItemDto(item, { detail: true }, await loadFoodDisplayNames(db, [item.food_id]));
   }
 
   async create(auth: AuthContext, profileId: string, input: MealCreateInput) {
@@ -200,12 +202,14 @@ export class MealService {
         p_correction_reason: input.correction_reason,
       }),
     );
-    return toMealItemDto(await loadItem(db, log.id, written.meal_item_id), { detail: true });
+    const item = await loadItem(db, log.id, written.meal_item_id);
+    return toMealItemDto(item, { detail: true }, await loadFoodDisplayNames(db, [item.food_id]));
   }
 
   private async detail(db: ScopedDbClient, profileId: string, mealLogId: string) {
     const log = await loadMealLog(db, profileId, mealLogId);
-    return toMealLogDto(log, await loadItems(db, log.id));
+    const items = await loadItems(db, log.id);
+    return toMealLogDto(log, items, await loadFoodDisplayNames(db, items.map((i) => i.food_id)));
   }
 }
 

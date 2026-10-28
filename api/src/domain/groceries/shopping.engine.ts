@@ -180,6 +180,8 @@ export interface GeneratedItemInput {
   quantity_exact: string | null;
   resolution_status: string;
   unresolved_reason: string | null;
+  /** The Food's display name (FoodAlias) resolved when read; null when none. */
+  food_display_name?: string | null;
 }
 
 export function itemShopping(
@@ -219,7 +221,7 @@ export function itemShopping(
   return {
     grocery_list_item_id: item.id,
     position: item.position,
-    food: item.food_id ? { food_id: item.food_id, canonical_name: item.display_name } : null,
+    food: item.food_id ? { food_id: item.food_id, canonical_name: item.display_name, display_name: item.food_display_name ?? null } : null,
     display_name: item.display_name,
     generation_resolution_status: item.resolution_status,
     generation_unresolved_reason: item.unresolved_reason,
@@ -248,7 +250,7 @@ export interface ManualItemInput {
   revoked_at: string | null;
 }
 
-export function manualShopping(item: ManualItemInput, purchases: readonly PurchaseRecord[], food: FoodConversionData | null, foodName: string | null) {
+export function manualShopping(item: ManualItemInput, purchases: readonly PurchaseRecord[], food: FoodConversionData | null, foodName: string | null, foodDisplayName: string | null = null) {
   const own = item.quantity !== null && item.unit !== null ? normalizeOwn({ quantity: item.quantity, unit: item.unit }) : null;
   const target: Target | null = own?.status === 'converted' ? { value: own.value, dimension: own.dimension, source: 'manual' } : null;
   const mode: PurchaseMode = own === null ? 'check_off' : 'quantity';
@@ -257,7 +259,7 @@ export function manualShopping(item: ManualItemInput, purchases: readonly Purcha
     grocery_manual_item_id: item.id,
     source: 'manual' as const,
     name: item.name,
-    food: item.food_id ? { food_id: item.food_id, canonical_name: foodName } : null,
+    food: item.food_id ? { food_id: item.food_id, canonical_name: foodName, display_name: foodDisplayName } : null,
     notes: item.notes,
     input: inputDto(item),
     quantity_unresolved_reason: own?.status === 'unresolved' ? own.reason : null,

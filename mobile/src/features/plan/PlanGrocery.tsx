@@ -19,7 +19,7 @@ import { useServices } from '../../state/AppProviders';
 import { queryKeys } from '../../state/queryClient';
 import { Button, Card, ErrorState, LoadingState, Notice, Text, errorMessage } from '../../ui';
 import { theme } from '../../ui/theme';
-import { amountText } from '../grocery/ShoppingScreen';
+import { amountText, groceryItemName } from '../grocery/ShoppingScreen';
 
 export function requirementText(item: GroceryRequirement): string {
   return item.quantity !== null && item.unit ? amountText({ quantity: item.quantity, unit: item.unit }) : t('grocery.fromPlanUnresolved');
@@ -98,8 +98,8 @@ function GroceryPreviewView({ planId, status, onOpenList }: { planId: string; st
         </Text>
       ) : null}
       {data.items.map((item, index) => (
-        <View key={index} accessible accessibilityLabel={`${item.display_name}. ${requirementText(item)}`} testID={`grocery-req-${index}`}>
-          <Text>{item.display_name}</Text>
+        <View key={index} accessible accessibilityLabel={`${groceryItemName(item)}. ${requirementText(item)}`} testID={`grocery-req-${index}`}>
+          <Text>{groceryItemName(item)}</Text>
           <Text variant="small">{requirementText(item)}</Text>
         </View>
       ))}

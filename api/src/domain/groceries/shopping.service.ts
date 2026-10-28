@@ -21,6 +21,7 @@ import type { ScopedDbClient, ScopedDbFactory } from '../../lib/scopedDb';
 import type { AuthContext } from '../../types/express';
 import { PLAN_READ_SCOPES, PLAN_WRITE_SCOPES } from '../mealPlans/mealPlan.service';
 import type { GroceryDimension } from './grocery.engine';
+import { loadFoodDisplayNames } from '../foods/foodDisplayName';
 import { loadFoods, type GroceryService } from './grocery.service';
 import { itemShopping, manualShopping, SHOPPING_RULES_VERSION, type ManualItemInput as ManualRow, type PurchaseRecord, type ShoppingStatus, type StateRecord } from './shopping.engine';
 import type { ManualItemInput, PurchaseInput, UserQuantityInput } from './shopping.schemas';
@@ -52,7 +53,10 @@ export class ShoppingService {
       db.select<PurchaseRow>('grocery_purchase', { columns: PURCHASE_COLUMNS, eq: { grocery_list_id: listId, profile_id: profileId }, limit: 10 * IN_MEMORY_PAGE_FETCH_CAP }),
       db.select<ManualRow>('grocery_manual_item', { columns: MANUAL_COLUMNS, eq: { grocery_list_id: listId, profile_id: profileId }, limit: IN_MEMORY_PAGE_FETCH_CAP }),
     ]);
-    const foods = await loadFoods(db, [...list.items.flatMap((i) => (i.food ? [i.food.food_id] : [])), ...manual.flatMap((m) => (m.food_id ? [m.food_id] : []))]);
+    const [foods, manualNames] = await Promise.all([
+      loadFoods(db, [...list.items.flatMap((i) => (i.food ? [i.food.food_id] : [])), ...manual.flatMap((m) => (m.food_id ? [m.food_id] : []))]),
+      loadFoodDisplayNames(db, manual.map((m) => m.food_id)),
+    ]);
     const of = <T extends { created_at: string; id: string }>(rows: readonly T[], match: (r: T) => boolean) => rows.filter(match).map((r) => num(r as T & { quantity: number | null })).sort(byTime);
 
     const items = list.items.map((item) =>
@@ -66,6 +70,7 @@ export class ShoppingService {
           quantity_exact: item.quantity_exact,
           resolution_status: item.resolution_status,
           unresolved_reason: item.unresolved_reason,
+          food_display_name: item.food?.display_name ?? null,
         },
         {
           alreadyHave: of(alreadyHave, (r) => r.grocery_list_item_id === item.id) as StateRecord[],
@@ -81,6 +86,7 @@ export class ShoppingService {
         of(purchases, (r) => r.grocery_manual_item_id === m.id),
         m.food_id ? (foods.get(m.food_id) ?? null) : null,
         m.food_id ? (foods.get(m.food_id)?.canonical_name ?? null) : null,
+        m.food_id ? (manualNames.get(m.food_id) ?? null) : null,
       ),
     );
     const activeManual = manualViews.filter((m) => m.revoked_at === null);
