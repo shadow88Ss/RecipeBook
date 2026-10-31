@@ -36,7 +36,7 @@ const PAPAYA = 'c1c1c1c1-0000-4000-8000-000000169228';
 const PAPAYA_CUP = 'c1c1c1c1-0000-4000-8000-0000000000c1';
 const PAPAYA_KEY = 'usda-fdc:169228';
 
-type Named = { food: { food_id: string; canonical_name: string | null; display_name: string | null } | null; display_name?: string };
+type Named = { food: { food_id: string; canonical_name: string | null; display_name: string | null } | null; display_name?: string; [field: string]: unknown };
 const byFood = <T extends Named>(items: T[], foodId: string): T => {
   const found = items.find((i) => i.food?.food_id === foodId);
   if (!found) throw new Error(`no item for ${foodId}`);
@@ -83,7 +83,7 @@ beforeAll(async () => {
   const gen = await A().post(`${plans}/${planId}/grocery-lists`);
   expect(gen.status).toBe(201);
   listId = gen.body.id;
-  expect(byFood(gen.body.items, PAPAYA).food.display_name).toBeNull();
+  expect(byFood(gen.body.items, PAPAYA).food?.display_name).toBeNull();
 
   // The USDA description arrives as the Food's aliases (ranked: primary over
   // non-primary, and an AI-matched alias never wins over a trusted one).
