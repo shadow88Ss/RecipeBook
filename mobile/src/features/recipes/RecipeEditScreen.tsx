@@ -9,10 +9,10 @@
 // server decides regardless.
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { View } from 'react-native';
 
-import type { RecipeDetail } from '../../api/contracts/recipes';
+import type { RecipeDetail, RecipeWrite } from '../../api/contracts/recipes';
 import { createRecipe, getRecipe, updateRecipe } from '../../api/endpoints';
 import { isApiError } from '../../api/errors';
 import { formatNumber, t } from '../../i18n';
@@ -66,12 +66,21 @@ export function RecipeEditScreen({ recipeId, onSaved }: { recipeId?: string; onS
   return <RecipeForm key={version?.id ?? 'new'} recipe={recipeId ? existing.data! : null} onSaved={onSaved} />;
 }
 
-function RecipeForm({ recipe, onSaved }: { recipe: RecipeDetail | null; onSaved: (recipeId: string) => void }) {
+/** Layer 13A — the form can also review an imported recipe: it starts from
+ * the import's draft and saves through the import (`submit`). */
+export interface ImportReview {
+  initialDraft: RecipeDraft;
+  submit: (recipe: RecipeWrite) => Promise<RecipeDetail>;
+  header: ReactNode;
+  conflictMessage: string;
+}
+
+export function RecipeForm({ recipe, onSaved, review }: { recipe: RecipeDetail | null; onSaved: (recipeId: string) => void; review?: ImportReview }) {
   const profile = useSelectedProfile();
   const { api } = useServices();
   const client = useQueryClient();
   const version = recipe?.current_version ?? null;
-  const [original] = useState<RecipeDraft>(() => (version ? draftFromVersion(version) : emptyDraft()));
+  const [original] = useState<RecipeDraft>(() => (version ? draftFromVersion(version) : (review?.initialDraft ?? emptyDraft())));
   const [draft, setDraft] = useState<RecipeDraft>(original);
   const [editing, setEditing] = useState<{ index: number | null; line: DraftIngredient } | null>(null);
   const [touched, setTouched] = useState(false);
@@ -79,6 +88,7 @@ function RecipeForm({ recipe, onSaved }: { recipe: RecipeDetail | null; onSaved:
 
   const save = useMutation({
     mutationFn: async () => {
+      if (review) return review.submit(toRecipeWrite(draft));
       if (!recipe || !version) return createRecipe(api, profile.id, toRecipeWrite(draft));
       return updateRecipe(api, profile.id, recipe.id, editPatch(original, draft)!, version.id);
     },
@@ -139,7 +149,8 @@ function RecipeForm({ recipe, onSaved }: { recipe: RecipeDetail | null; onSaved:
 
   return (
     <Screen testID="recipe-edit-screen">
-      <Text variant="title">{version ? t('recipeEdit.editTitle') : t('recipeEdit.newTitle')}</Text>
+      <Text variant="title">{version ? t('recipeEdit.editTitle') : review ? t('recipeImport.reviewTitle') : t('recipeEdit.newTitle')}</Text>
+      {review?.header}
       {version ? <Text variant="small">{t('recipeEdit.newVersionNote', { number: version.version_number })}</Text> : null}
       <Input label={t('recipeEdit.title')} value={draft.title} onChangeText={(title) => set({ title })} maxLength={200} testID="recipe-title" />
       {show('title') ? <Text variant="error">{t('recipeEdit.error.title')}</Text> : null}
@@ -182,10 +193,10 @@ function RecipeForm({ recipe, onSaved }: { recipe: RecipeDetail | null; onSaved:
       {nothingChanged ? <Text variant="muted" testID="nothing-changed">{t('recipeEdit.nothingChanged')}</Text> : null}
       {save.isError ? (
         <Text variant="error" testID="recipe-save-error">
-          {isApiError(save.error) && save.error.kind === 'conflict' ? t('recipeEdit.error.conflict') : errorMessage(save.error)}
+          {isApiError(save.error) && save.error.kind === 'conflict' ? (review?.conflictMessage ?? t('recipeEdit.error.conflict')) : errorMessage(save.error)}
         </Text>
       ) : null}
-      <Button label={version ? t('recipeEdit.saveVersion') : t('recipeEdit.create')} onPress={submit} disabled={save.isPending} testID="recipe-save" />
+      <Button label={version ? t('recipeEdit.saveVersion') : review ? t('recipeImport.save') : t('recipeEdit.create')} onPress={submit} disabled={save.isPending} testID="recipe-save" />
     </Screen>
   );
 }

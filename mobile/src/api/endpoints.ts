@@ -49,6 +49,7 @@ import {
   type PlannedMealCreate,
 } from './contracts/mealPlans';
 import { progressSchema, type Progress } from './contracts/progress';
+import { recipeImportSchema, type RecipeImport } from './contracts/recipeImports';
 import { recipeDetailSchema, recipeNutritionSchema, recipePageSchema, type RecipeDetail, type RecipeNutrition, type RecipePage, type RecipeWrite } from './contracts/recipes';
 
 /** Upper bound on profile pages followed; a household has far fewer. */
@@ -181,6 +182,26 @@ export function updateRecipe(api: ApiClient, profileId: string, recipeId: string
     body: { ...patch, expected_current_version_id: expectedVersionId },
     schema: recipeDetailSchema,
   });
+}
+
+// ---- Layer 13A — Recipe import from a website link ---------------------------
+
+const recipeImportsPath = (profileId: string) => `/v1/profiles/${encodeURIComponent(profileId)}/recipe-imports`;
+
+/** POST — the server fetches the page and reads its recipe. A page that could
+ * not be imported is still a result (`status` + `error_code`), not an error.
+ * Retrying with the same `idempotencyKey` returns the same import. */
+export function startRecipeImport(api: ApiClient, profileId: string, url: string, idempotencyKey: string): Promise<RecipeImport> {
+  return api.request(recipeImportsPath(profileId), { method: 'POST', body: { url, idempotency_key: idempotencyKey }, schema: recipeImportSchema });
+}
+
+export function getRecipeImport(api: ApiClient, profileId: string, importId: string, signal?: AbortSignal): Promise<RecipeImport> {
+  return api.request(`${recipeImportsPath(profileId)}/${encodeURIComponent(importId)}`, { schema: recipeImportSchema, signal });
+}
+
+/** POST — saves the reviewed recipe; the server records where it came from. */
+export function saveRecipeImport(api: ApiClient, profileId: string, importId: string, recipe: RecipeWrite): Promise<RecipeDetail> {
+  return api.request(`${recipeImportsPath(profileId)}/${encodeURIComponent(importId)}/save`, { method: 'POST', body: recipe, schema: recipeDetailSchema });
 }
 
 // ---- Layer 12C — Meal plans (read) ------------------------------------------

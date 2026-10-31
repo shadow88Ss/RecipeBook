@@ -2,7 +2,8 @@
 // (GET /v1/profiles/{id}/recipes), most recently updated first, with the
 // server's title search and cursor paging. Every scope that can read the
 // Profile can read its recipes; the server decides each request. Layer 12D
-// adds "New recipe" for scopes that can manage recipes.
+// adds "New recipe" for scopes that can manage recipes; Layer 13A adds
+// "Import from a link".
 
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -16,7 +17,7 @@ import { useServices } from '../../state/AppProviders';
 import { queryKeys } from '../../state/queryClient';
 import { Button, EmptyState, ErrorState, Input, LoadingState, Row, Screen, Text } from '../../ui';
 
-export function RecipesScreen({ onOpen, onNew }: { onOpen: (recipeId: string) => void; onNew?: () => void }) {
+export function RecipesScreen({ onOpen, onNew, onImport }: { onOpen: (recipeId: string) => void; onNew?: () => void; onImport?: () => void }) {
   const profile = useSelectedProfile();
   const { api } = useServices();
   const [text, setText] = useState('');
@@ -37,6 +38,7 @@ export function RecipesScreen({ onOpen, onNew }: { onOpen: (recipeId: string) =>
       <Text variant="title">{t('recipes.title')}</Text>
       <Text variant="muted">{profile.display_name}</Text>
       {onNew && canManageRecipes(profile.access_scope) ? <Button label={t('recipeEdit.newTitle')} onPress={onNew} testID="new-recipe" /> : null}
+      {onImport && canManageRecipes(profile.access_scope) ? <Button label={t('recipes.importLink')} variant="secondary" onPress={onImport} testID="import-recipe" /> : null}
       <Input
         label={t('recipes.searchLabel')}
         value={text}

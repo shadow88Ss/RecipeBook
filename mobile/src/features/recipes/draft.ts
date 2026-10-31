@@ -11,6 +11,7 @@
 //     how a user confirms a match. If the list changes, such a line is sent as
 //     text only, and the form says so first.
 
+import type { ImportDraft } from '../../api/contracts/recipeImports';
 import type { RecipeIngredient, RecipeIngredientInput, RecipeVersion, RecipeWrite } from '../../api/contracts/recipes';
 import type { FoodAmount } from '../food/FoodAmount';
 import { parseQuantity } from '../log/LogItemScreen';
@@ -61,6 +62,25 @@ export function draftFromVersion(version: RecipeVersion): RecipeDraft {
       unconfirmedSuggestion: i.match_status === 'needs_confirmation',
     })),
     steps: version.instructions.map((s) => s.text),
+  };
+}
+
+/** Layer 13A — an imported recipe as a form draft. Amounts the server read
+ * with certainty are kept (a unit, or a count); nothing is linked to a Food:
+ * the user links foods while reviewing. */
+export function draftFromImport(imported: ImportDraft): RecipeDraft {
+  return {
+    title: imported.title,
+    servingsText: imported.servings === null ? '' : String(imported.servings),
+    description: imported.description ?? '',
+    ingredients: imported.ingredients.map((i) => ({
+      key: newKey(),
+      text: i.text,
+      food: null,
+      amount: i.quantity === undefined ? null : i.unit ? { kind: 'unit', quantity: i.quantity, unit: i.unit } : { kind: 'count', quantity: i.quantity },
+      unconfirmedSuggestion: false,
+    })),
+    steps: [...imported.instructions],
   };
 }
 

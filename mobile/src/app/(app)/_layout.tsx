@@ -11,6 +11,7 @@ export default function AppLayout() {
       <Stack.Screen name="recipes" options={{ title: t('more.recipes') }} />
       <Stack.Screen name="recipe" options={{ title: t('recipes.title') }} />
       <Stack.Screen name="recipe-edit" options={{ title: t('recipes.title') }} />
+      <Stack.Screen name="recipe-import" options={{ title: t('recipes.title') }} />
       <Stack.Screen name="plan" options={{ title: t('more.plan') }} />
       <Stack.Screen name="meal-plan" options={{ title: t('more.plan') }} />
       <Stack.Screen name="plan-new" options={{ title: t('more.plan') }} />
