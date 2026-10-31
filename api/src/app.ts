@@ -31,6 +31,9 @@ import { createNutritionRouter } from './domain/nutrition/nutrition.routes';
 import { createProductRouter } from './domain/products/product.routes';
 import { ProductService } from './domain/products/product.service';
 import { NutritionService } from './domain/nutrition/nutrition.service';
+import { createPageFetcher, type PageFetcher } from './domain/recipeImports/pageFetcher';
+import { createRecipeImportRouter } from './domain/recipeImports/recipeImport.routes';
+import { RecipeImportService } from './domain/recipeImports/recipeImport.service';
 import { createRecipeRouter, createRecipeVariantRouter } from './domain/recipes/recipe.routes';
 import { RecipeService } from './domain/recipes/recipe.service';
 import { RecipeVariantService } from './domain/recipes/recipeVariant.service';
@@ -73,9 +76,12 @@ export interface AppDependencies {
    * (internal catalog + FatSecret + Open Food Facts adapters over real
    * HTTP), `env:` secret references, NODE_ENV. */
   integrations?: { registry?: AdapterRegistry; secrets?: SecretResolver; deploymentEnvironment?: string; now?: () => Date };
+  /** Layer 13A — fetches recipe pages for link import. Default: the
+   * SSRF-guarded HTTP fetcher (recipeImports/pageFetcher.ts). */
+  pageFetcher?: PageFetcher;
 }
 
-export function createApp({ profileRepository, scopedDbFactory, tokenVerifier, jwtSecret, logger, integrations }: AppDependencies): Express {
+export function createApp({ profileRepository, scopedDbFactory, tokenVerifier, jwtSecret, logger, integrations, pageFetcher }: AppDependencies): Express {
   const app = express();
   app.disable('x-powered-by');
 
@@ -108,6 +114,7 @@ export function createApp({ profileRepository, scopedDbFactory, tokenVerifier, j
   const externalProductService = new ExternalProductService(scopedDbFactory, adapterRegistry, new ProviderExecutor(secretResolver, logger, integrations?.now), productService);
   const recipeService = new RecipeService(scopedDbFactory);
   const recipeVariantService = new RecipeVariantService(scopedDbFactory);
+  const recipeImportService = new RecipeImportService(scopedDbFactory, pageFetcher ?? createPageFetcher());
   const mealService = new MealService(scopedDbFactory);
   const dailyTrackerService = new DailyTrackerService(scopedDbFactory, effectiveTargetService);
   const mealPlanService = new MealPlanService(scopedDbFactory, effectiveTargetService);
@@ -125,6 +132,8 @@ export function createApp({ profileRepository, scopedDbFactory, tokenVerifier, j
   // Layer 6A — Recipe Book core (nutrition through the Layer 5B engine).
   v1.use('/profiles/:profile_id/recipes', requireAuth, createRecipeRouter(recipeService));
   v1.use('/profiles/:profile_id/recipe-variants', requireAuth, createRecipeVariantRouter(recipeVariantService));
+  // Layer 13A — importing recipes from website links.
+  v1.use('/profiles/:profile_id/recipe-imports', requireAuth, createRecipeImportRouter(recipeImportService, recipeService));
   // Layer 7A — actual food/meal consumption logging (snapshotted nutrition).
   v1.use('/profiles/:profile_id/meals', requireAuth, createMealRouter(mealService));
   // Layer 7B — Daily Nutrition Tracker (read model over 7A snapshots + the resolver).

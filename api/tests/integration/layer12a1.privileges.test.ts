@@ -75,8 +75,12 @@ const ANON_EXECUTABLE = ['gtin_check_digit_valid(text)', 'gtin_is_product_identi
 const AUTHENTICATED_EXECUTABLE = [
   'admin_register_external_provider(jsonb)',
   'admin_update_external_provider(text,jsonb)',
+  // Layer 13A — recipe link import (20261101120000_recipe_url_import.sql).
+  'begin_url_recipe_import(uuid,text,text,url_source_provider,text,text)',
   'can_manage_recipe(uuid)',
   'can_read_recipe(uuid)',
+  'claim_url_import_for_save(uuid,uuid)',
+  'complete_url_recipe_import(uuid,jsonb)',
   'confirm_meal_plan(uuid,uuid,jsonb)',
   'correct_meal_item(uuid,uuid,uuid,jsonb,text)',
   'create_recipe_version(uuid,uuid,uuid,jsonb)',
@@ -91,7 +95,9 @@ const AUTHENTICATED_EXECUTABLE = [
   'is_platform_admin()',
   'log_meal_items(uuid,uuid,jsonb)',
   'profile_access_scope(uuid)',
+  'save_url_import_recipe(uuid,uuid,jsonb)',
   'search_foods(text,text[],integer)',
+  'url_recipe_import_source(uuid)',
   'write_planned_meal_items(uuid,uuid,uuid,uuid,jsonb)',
 ];
 

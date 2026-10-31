@@ -906,3 +906,23 @@ The five-field `summary` is unchanged:
 - a day mixing both kinds of label reports `carbohydrate_g` as `partial`.
 
 Target writes accept the four keys (and their `<key>_g` aliases) as field names; no target is created automatically.
+
+## 33. Phase 4 Layer 13A — Website Recipe Import (implemented)
+
+Builds on §17 (Recipe Book) and the Layer 1 import entities (`UrlSource`, `ImportJob`, `RawContent`, `AiExtraction`; `29_Data_Model.md` §7). `08_URL_Content_Ingestion.md` is **not available in the repository**; this layer implements only deterministic website import and defers everything that document would own (social platforms, AI reading of free text, scheduled rechecks, retention windows). Migration: `20261101120000_recipe_url_import.sql`. Code: `api/src/domain/recipeImports/`.
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/v1/profiles/{profile_id}/recipe-imports` | `{ url, idempotency_key? }`. 201 with the import; 200 for a repeated `idempotency_key` (no second fetch); 409 for a key reused with another link. A page that could not be imported is still 201, with `status` `permanently_failed`/`retryable_failed` and an `error_code`. |
+| GET | `/v1/profiles/{profile_id}/recipe-imports/{import_id}` | The import, its extraction summary and `draft`. |
+| POST | `/v1/profiles/{profile_id}/recipe-imports/{import_id}/save` | Body = recipe create (§17). 201 with the recipe detail; 409 `existing_recipe_id` when the Profile already has a recipe from this source; 409 when the import is not `needs_confirmation`. |
+
+Rules:
+1. *Authorization.* Start/read/save need `full_management` (as recipe create). Reads are further limited to the requesting Account (`import_job_select_own`). Another Account never sees an import (404).
+2. *Sources.* Only `web` links are fetched. Instagram, TikTok and YouTube links are refused with 400 (`unsupported_provider`) before anything is recorded. Only http/https, default ports, no credentials, public DNS names; IP literals and internal names are refused (`host_not_allowed`).
+3. *Fetching (SSRF).* DNS is resolved by the API and every answer is checked against private, loopback, link-local (cloud metadata), CGNAT, multicast and reserved ranges, IPv4 and IPv6; the connection is pinned to the checked address. Redirects (max 5) are re-validated per hop. 10 s total timeout, 3 MB decoded body cap, HTML only, no cookies.
+4. *Extraction.* Deterministic: the page's schema.org `Recipe` JSON-LD (`extraction_method = schema_org_json_ld`, `model_version = recipe-json-ld-v1`). Pages without it fail with `no_recipe_found`. Nothing is invented: unstated fields stay empty and every ingredient keeps its published line.
+5. *Amounts.* Filled only when certain: a uniquely resolved registry unit gives quantity + unit; no unit word gives a count; ambiguous measures (cup, tbsp, tsp, fl oz, pint …) give neither (`note: ambiguous_unit`), as do ranges. No Food is matched automatically; every ingredient is saved `unmatched` unless the user picks a Food when reviewing.
+6. *Records.* `UrlSource` is upserted by canonical URL (fragment, tracking parameters, default port and trailing slash removed; other parameters sorted). Each request is a new `ImportJob` (`initial_import`, then `manual_reimport` for the same Profile). `RawContent` keeps only the page's Recipe node (`content_type = json`, `storage_reference = inline:content_excerpt`, ≤ 1 MB), never the page. `AiExtraction` keeps the draft (`source = url_import`). Writes go through narrow SECURITY DEFINER functions acting only on the caller's own job; no service-role key.
+7. *Saving and provenance.* `save_url_import_recipe()` marks the job `succeeded` and writes version 1 with `origin_import_job_id`, `origin_url_source_id`, `origin_ai_extraction_id`, in one transaction. Later versions carry the origin forward. A trigger now refuses any recipe version whose origin is not an import of the same Profile with an extraction (previously a client could insert any origin ids).
+8. *Synchronous.* The import runs inside the POST request; job state is durable so a worker can take over without a contract change. A job interrupted mid-request stays `processing`.

@@ -49,6 +49,7 @@ import {
   type VersionContent,
 } from './recipe.dto';
 import { calculateRecipeNutrition } from './recipe.nutrition';
+import { recipeFromOrigin } from './recipeOrigin';
 import { normalizeSearchText, type RecipeCreateInput, type RecipeIngredientInput, type RecipeListQuery, type RecipePatchInput } from './recipe.schemas';
 
 export const RECIPE_READ_SCOPES = ['full_management', 'view_only', 'pediatric_weight_management'] as const;
@@ -71,6 +72,9 @@ interface VersionWriteContent {
   servings: number | null;
   ingredients: IngredientContent[];
   instructions: string[];
+  /** Layer 13A — the import this recipe came from, carried into every later
+   * version (validated by trg_recipe_version_origin_valid). */
+  origin?: { import_job_id: string; url_source_id: string | null; ai_extraction_id: string | null };
 }
 
 interface VersionWriteResult {
@@ -129,6 +133,39 @@ export class RecipeService {
     return this.detail(db, profileId, written.recipe_id);
   }
 
+  /** Layer 13A — saves the reviewed recipe of an import as a new recipe
+   * whose version 1 records the import as its origin. The import is marked
+   * `succeeded` in the same transaction (save_url_import_recipe). */
+  async saveImport(auth: AuthContext, profileId: string, importJobId: string, input: RecipeCreateInput) {
+    const db = this.dbFactory.forUser(auth);
+    await requireProfileScope(db, profileId, RECIPE_WRITE_SCOPES);
+    const content: VersionWriteContent = {
+      title: input.title,
+      description: input.description ?? null,
+      servings: input.servings,
+      ingredients: await this.resolveIngredientInputs(db, input.ingredients),
+      instructions: input.instructions,
+    };
+    let written: VersionWriteResult;
+    try {
+      written = await db.rpc<VersionWriteResult>('save_url_import_recipe', { p_profile_id: profileId, p_import_job_id: importJobId, p_content: content });
+    } catch (err) {
+      const code = (err as { code?: unknown }).code;
+      if (code === '23505') {
+        const existing = await recipeFromOrigin(db, profileId, 'origin_import_job_id', importJobId).then(
+          async (fromJob) => fromJob ?? (await existingFromSameSource(db, importJobId, profileId)),
+        );
+        throw AppError.conflict('A recipe from this link is already in your recipe book.', { existing_recipe_id: existing });
+      }
+      if (code === '55000') throw AppError.conflict('This import is not ready to be saved.');
+      if (code === 'P0002') throw AppError.notFound('Import not found.');
+      if (code === '42501') throw AppError.forbidden('This operation is not permitted for this profile.');
+      if (code === '23503') throw AppError.validation('An ingredient references a food or serving that does not exist.');
+      throw err;
+    }
+    return this.detail(db, profileId, written.recipe_id);
+  }
+
   /** Creates a new RecipeVersion from the current one plus the patch. The
    * previous version and its rows are left untouched. */
   async update(auth: AuthContext, profileId: string, recipeId: string, patch: RecipePatchInput) {
@@ -151,6 +188,15 @@ export class RecipeService {
       instructions:
         patch.instructions ??
         [...(current?.instructions ?? [])].sort((a, b) => a.step_number - b.step_number).map((s) => s.instruction_text),
+      ...(current?.version.origin_import_job_id
+        ? {
+            origin: {
+              import_job_id: current.version.origin_import_job_id,
+              url_source_id: current.version.origin_url_source_id,
+              ai_extraction_id: current.version.origin_ai_extraction_id,
+            },
+          }
+        : {}),
     };
     if (content.ingredients.length === 0) {
       throw AppError.validation('A recipe version needs at least one ingredient.', { issues: [{ path: 'ingredients', message: 'Required.' }] });
@@ -261,6 +307,12 @@ export class RecipeService {
       match_confidence: null,
     }));
   }
+}
+
+async function existingFromSameSource(db: ScopedDbClient, importJobId: string, profileId: string): Promise<string | null> {
+  const jobs = await db.select<{ url_source_id: string }>('import_job', { columns: 'url_source_id', eq: { id: importJobId }, limit: 1 });
+  const source = jobs[0]?.url_source_id;
+  return source ? recipeFromOrigin(db, profileId, 'origin_url_source_id', source) : null;
 }
 
 /** An unchanged ingredient is copied into the new version verbatim,
