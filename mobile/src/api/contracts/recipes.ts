@@ -8,7 +8,8 @@ import { z } from 'zod';
 
 import { pageSchema } from './common';
 import { nutritionSummarySchema } from './dailyTracker';
-import { aggregateNutrientSchema } from './nutrition';
+import { aggregateNutrientSchema, itemNutrientSchema } from './nutrition';
+import { statedNutritionSchema } from './recipeImports';
 
 export const recipeListItemSchema = z.object({
   id: z.string(),
@@ -68,7 +69,17 @@ export const recipeNutritionSchema = z.object({
   whole_recipe: recipeNutritionViewSchema,
   per_serving: recipeNutritionViewSchema.extend({ servings: z.number().nullable() }).nullable(),
   per_serving_status: z.enum(['available', 'servings_not_defined']),
-  ingredients: z.array(z.object({ ingredient_id: z.string(), index: z.number(), nutrition_status: z.string() })).default([]),
+  ingredients: z
+    .array(
+      z.object({
+        ingredient_id: z.string(),
+        index: z.number(),
+        nutrition_status: z.string(),
+        /** Layer 13A.1 — this ingredient's own nutrition, for its amount, as the server calculated it; null when not counted. */
+        calculation: z.object({ summary: nutritionSummarySchema, nutrients: z.array(itemNutrientSchema).default([]) }).nullable().default(null).catch(null),
+      }),
+    )
+    .default([]),
 });
 export type RecipeNutrition = z.infer<typeof recipeNutritionSchema>;
 
@@ -79,6 +90,8 @@ export const recipeDetailSchema = z.object({
   updated_at: z.string(),
   version_count: z.number(),
   current_version: recipeVersionSchema.nullable(),
+  /** Layer 13A.1 — where an imported recipe came from, and the nutrition that page states (not verified, not used in totals). */
+  imported_source: z.object({ url: z.string(), stated_nutrition: statedNutritionSchema.nullable() }).nullable().default(null),
 });
 export type RecipeDetail = z.infer<typeof recipeDetailSchema>;
 
@@ -91,7 +104,16 @@ export type RecipeDetail = z.infer<typeof recipeDetailSchema>;
  * quantity + serving_id (a serving of that Food), quantity alone (a count),
  * or nothing. Server-owned fields (match state, order numbers) are never sent.
  */
-export type RecipeIngredientInput = { text: string; food_id?: string; serving_id?: string; quantity?: number; unit?: string };
+export type RecipeIngredientInput = {
+  text: string;
+  food_id?: string;
+  serving_id?: string;
+  quantity?: number;
+  unit?: string;
+  /** Layer 13A.1 — import save only: a suggestion the user did not confirm; stored unconfirmed and not counted. */
+  suggested_food_id?: string;
+  suggestion_confidence?: number;
+};
 
 export interface RecipeWrite {
   title: string;

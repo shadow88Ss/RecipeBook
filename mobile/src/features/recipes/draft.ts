@@ -27,6 +27,10 @@ export interface DraftIngredient {
   amount: DraftAmount | null;
   /** Stored line whose match was proposed but never confirmed. */
   unconfirmedSuggestion: boolean;
+  /** Layer 13A.1 — an import's proposed Food, not yet confirmed. */
+  suggestion?: { foodId: string; name: string; confidence: number };
+  /** Layer 13A.1 — why the import left the amount empty (e.g. `ambiguous_unit`). */
+  note?: string;
 }
 
 export interface RecipeDraft {
@@ -79,6 +83,8 @@ export function draftFromImport(imported: ImportDraft): RecipeDraft {
       food: null,
       amount: i.quantity === undefined ? null : i.unit ? { kind: 'unit', quantity: i.quantity, unit: i.unit } : { kind: 'count', quantity: i.quantity },
       unconfirmedSuggestion: false,
+      ...(i.suggestion ? { suggestion: { foodId: i.suggestion.food_id, name: i.suggestion.name, confidence: i.suggestion.confidence } } : {}),
+      ...(i.note ? { note: i.note } : {}),
     })),
     steps: [...imported.instructions],
   };
@@ -93,6 +99,11 @@ export function toIngredientInput(d: DraftIngredient): RecipeIngredientInput {
     if (a.kind === 'unit') out.unit = a.unit;
     // A serving belongs to a Food; without the Food it cannot be sent.
     if (a.kind === 'serving' && d.food) out.serving_id = a.servingId;
+  }
+  // An unconfirmed import suggestion travels as a suggestion only (the server stores it unconfirmed).
+  if (!d.food && d.suggestion) {
+    out.suggested_food_id = d.suggestion.foodId;
+    out.suggestion_confidence = d.suggestion.confidence;
   }
   return out;
 }

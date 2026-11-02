@@ -24,6 +24,7 @@ import { useServices } from '../../state/AppProviders';
 import { Button, Input, Notice, Screen, Text, errorMessage } from '../../ui';
 import { RecipeForm } from './RecipeEditScreen';
 import { draftFromImport } from './draft';
+import { hostOf, StatedNutrition } from './StatedNutrition';
 
 const newIdempotencyKey = () => `import-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 
@@ -119,6 +120,7 @@ export function RecipeImportScreen({ onSaved, onOpenRecipe }: { onSaved: (recipe
                 </Text>
               ) : null}
               {draft.truncated ? <Text variant="small">{t('recipeImport.truncated')}</Text> : null}
+              {draft.source_nutrition ? <StatedNutrition stated={draft.source_nutrition} host={host} review /> : null}
             </>
           ),
         }}
@@ -175,11 +177,3 @@ export function RecipeImportScreen({ onSaved, onOpenRecipe }: { onSaved: (recipe
   );
 }
 
-function hostOf(url: string | undefined): string {
-  if (!url) return '';
-  try {
-    return new URL(url).hostname.replace(/^www\./, '');
-  } catch {
-    return '';
-  }
-}

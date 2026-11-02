@@ -12,7 +12,16 @@ export const importDraftIngredientSchema = z.object({
   unit: z.string().optional(),
   /** Why no amount was filled in although the line starts with a number. */
   note: z.string().optional(),
+  /** Layer 13A.1 — a proposed Food; it counts only after the user confirms it. */
+  suggestion: z.object({ food_id: z.string(), name: z.string(), confidence: z.number() }).optional(),
 });
+/** Layer 13A.1 — nutrition as the source page states it (schema.org names), per serving. Never calculated or used in totals. */
+export const statedNutritionSchema = z.object({
+  serving_size: z.string().nullable(),
+  values: z.array(z.object({ field: z.string(), text: z.string() })),
+});
+export type StatedNutrition = z.infer<typeof statedNutritionSchema>;
+
 export type ImportDraftIngredient = z.infer<typeof importDraftIngredientSchema>;
 
 export const importDraftSchema = z.object({
@@ -23,6 +32,7 @@ export const importDraftSchema = z.object({
   ingredients: z.array(importDraftIngredientSchema),
   instructions: z.array(z.string()),
   truncated: z.boolean().default(false),
+  source_nutrition: statedNutritionSchema.nullable().default(null),
 });
 export type ImportDraft = z.infer<typeof importDraftSchema>;
 

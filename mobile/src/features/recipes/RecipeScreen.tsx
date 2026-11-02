@@ -22,7 +22,9 @@ import { useServices } from '../../state/AppProviders';
 import { queryKeys } from '../../state/queryClient';
 import { Button, Card, Choice, ChoiceRow, ErrorState, LoadingState, Notice, Screen, Text } from '../../ui';
 import { theme } from '../../ui/theme';
-import { fromAggregate } from '../nutrition/display';
+import { fromAggregate, fromItem } from '../nutrition/display';
+import { formatAmount, SUMMARY_UNITS } from '../today/format';
+import { hostOf, StatedNutrition } from './StatedNutrition';
 import { NutritionDetails } from '../nutrition/NutritionDetails';
 import { SummaryCards } from '../nutrition/SummaryCards';
 import { servingsText } from './RecipesScreen';
@@ -60,11 +62,19 @@ export function RecipeScreen({ recipeId, onEdit }: { recipeId: string; onEdit?: 
       {version ? (
         <>
           {onEdit && canManageRecipes(profile.access_scope) ? <Button label={t('recipeEdit.edit')} variant="secondary" onPress={onEdit} testID="edit-recipe" /> : null}
+          {recipe.data?.imported_source ? (
+            <Text variant="small" testID="recipe-source">
+              {t('recipes.source', { host: hostOf(recipe.data.imported_source.url) })}
+            </Text>
+          ) : null}
           {version.description ? <Text>{version.description}</Text> : null}
           <Text testID="recipe-servings">{servingsText(version.servings)}</Text>
           {nutrition.isPending ? <LoadingState /> : null}
           {nutrition.isError ? <ErrorState error={nutrition.error} onRetry={() => void nutrition.refetch()} /> : null}
           {nutrition.data ? <RecipeNutritionView nutrition={nutrition.data} /> : null}
+          {recipe.data?.imported_source?.stated_nutrition ? (
+            <StatedNutrition stated={recipe.data.imported_source.stated_nutrition} host={hostOf(recipe.data.imported_source.url)} />
+          ) : null}
           <Ingredients version={version} statuses={nutrition.data?.recipe_version_id === version.id ? nutrition.data.ingredients : []} />
           <Steps version={version} />
         </>
@@ -113,14 +123,28 @@ export function ingredientStatusText(status: string): string | null {
   return key in en ? t(key as MessageKey) : t('recipes.ingredient.other');
 }
 
+/** One ingredient's own calculated values for its amount, from the server; unknown is "Not available", never 0. */
+export function ingredientNutritionLine(summary: NonNullable<RecipeNutrition['ingredients'][number]['calculation']>['summary']): string {
+  const value = (field: keyof typeof SUMMARY_UNITS) => formatAmount(summary[field], SUMMARY_UNITS[field]);
+  return t('recipes.ingredient.nutritionLine', {
+    energy: value('energy_kcal'),
+    protein: value('protein_g'),
+    carbohydrate: value('carbohydrate_g'),
+    fat: value('fat_g'),
+    fiber: value('fiber_g'),
+  });
+}
+
 function Ingredients({ version, statuses }: { version: RecipeVersion; statuses: RecipeNutrition['ingredients'] }) {
   const statusById = new Map(statuses.map((s) => [s.ingredient_id, s.nutrition_status]));
+  const calculationById = new Map(statuses.map((s) => [s.ingredient_id, s.calculation]));
   return (
     <View style={{ gap: theme.space.xs }} testID="recipe-ingredients">
       <Text variant="heading">{t('recipes.ingredients')}</Text>
       {version.ingredients.map((ingredient) => {
         const status = statusById.get(ingredient.id);
         const reason = status ? ingredientStatusText(status) : null;
+        const calculation = calculationById.get(ingredient.id) ?? null;
         return (
           <Card key={ingredient.id} testID={`ingredient-${ingredient.id}`} accessibilityLabel={[ingredient.text, reason].filter(Boolean).join('. ')}>
             <Text>{ingredient.text}</Text>
@@ -128,6 +152,14 @@ function Ingredients({ version, statuses }: { version: RecipeVersion; statuses: 
               <Text variant="small" testID={`ingredient-status-${ingredient.id}`}>
                 {reason}
               </Text>
+            ) : null}
+            {calculation ? (
+              <>
+                <Text variant="small" testID={`ingredient-nutrition-${ingredient.id}`}>
+                  {ingredientNutritionLine(calculation.summary)}
+                </Text>
+                <NutritionDetails rows={calculation.nutrients.map(fromItem)} testID={`ingredient-details-${ingredient.id}`} />
+              </>
             ) : null}
           </Card>
         );

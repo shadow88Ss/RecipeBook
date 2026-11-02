@@ -6,6 +6,7 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react-native';
 
 import { RecipeImportScreen } from '../src/features/recipes/RecipeImportScreen';
+import { RecipeScreen } from '../src/features/recipes/RecipeScreen';
 import { RecipesScreen } from '../src/features/recipes/RecipesScreen';
 import { PROFILE_A, profileDto, profilePage } from './helpers/fixtures';
 import { json, type Call } from './helpers/fakeServer';
@@ -173,5 +174,137 @@ describe('Import from a link', () => {
     await fireEvent.press(await screen.findByTestId('recipe-save'));
     await fireEvent.press(await screen.findByTestId('import-open-existing'));
     expect(onOpen).toHaveBeenCalledWith(RECIPE);
+  });
+});
+
+// ---- Layer 13A.1 — nutrition of imported recipes --------------------------
+
+const SPINACH = 'bbbbbbbb-1111-4000-8000-0000000000f9';
+const withSuggestions = () => {
+  const base = imported();
+  return {
+    ...base,
+    draft: {
+      ...base.draft!,
+      ingredients: [
+        { text: '200 g cooked rice', quantity: 200, unit: 'g' },
+        { text: '2 cups spinach', note: 'ambiguous_unit', suggestion: { food_id: SPINACH, name: 'Spinach', match_kind: 'exact', confidence: 0.8, term: 'spinach' } },
+        { text: '1 egg', quantity: 1 },
+      ],
+      source_nutrition: {
+        basis: 'per_serving',
+        serving_size: '1 bowl',
+        values: [
+          { field: 'calories', text: '320 calories', amount: 320, unit: 'kcal' },
+          { field: 'proteinContent', text: '12 g', amount: 12, unit: 'g' },
+        ],
+      },
+    },
+  };
+};
+
+describe('Imported recipe nutrition (13A.1)', () => {
+  it('shows suggestions as unconfirmed, flags cup lines, shows stated nutrition, and saves an unconfirmed suggestion as a suggestion', async () => {
+    const saved: Call[] = [];
+    await renderApp(<RecipeImportScreen onSaved={jest.fn()} onOpenRecipe={jest.fn()} />, {
+      routes: {
+        'GET /v1/profiles': profiles(),
+        [`POST ${PATH}`]: () => json(201, withSuggestions()),
+        [`POST ${PATH}/${IMPORT}/save`]: (call) => {
+          saved.push(call);
+          return json(201, savedRecipe);
+        },
+      },
+    });
+    await fireEvent.changeText(await screen.findByTestId('import-url'), LINK);
+    await fireEvent.press(screen.getByTestId('import-submit'));
+    expect(await screen.findByTestId('draft-ingredient-status-1')).toHaveTextContent('Suggested food: Spinach. Not counted until you confirm it.');
+    expect(screen.getByTestId('draft-ingredient-note-1')).toHaveTextContent(/cup and spoon sizes differ/);
+    expect(screen.getByTestId('confirm-suggestion-1')).toBeTruthy();
+    expect(screen.queryByTestId('confirm-suggestion-0')).toBeNull();
+    expect(screen.getByTestId('stated-nutrition')).toHaveTextContent(/Nutrition stated by kitchen\.example\.com/);
+    expect(screen.getByTestId('stated-calories')).toHaveTextContent('Calories: 320 calories');
+
+    await fireEvent.press(screen.getByTestId('recipe-save'));
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect((saved[0]!.body as { ingredients: unknown[] }).ingredients[1]).toEqual({ text: '2 cups spinach', suggested_food_id: SPINACH, suggestion_confidence: 0.8 });
+  });
+
+  it('Confirm opens the line with the suggested food linked, ready for an amount', async () => {
+    await renderApp(<RecipeImportScreen onSaved={jest.fn()} onOpenRecipe={jest.fn()} />, {
+      routes: {
+        'GET /v1/profiles': profiles(),
+        [`POST ${PATH}`]: () => json(201, withSuggestions()),
+        [`GET /v1/foods/${SPINACH}`]: () => json(200, { id: SPINACH, canonical_name: 'spinach', category: null, display_name: 'Spinach', servings: [] }),
+        'GET /v1/units': () => json(200, { data: [{ code: 'g', dimension: 'mass', label: 'g' }] }),
+      },
+    });
+    await fireEvent.changeText(await screen.findByTestId('import-url'), LINK);
+    await fireEvent.press(screen.getByTestId('import-submit'));
+    await fireEvent.press(await screen.findByTestId('confirm-suggestion-1'));
+    expect(await screen.findByTestId('linked-food')).toHaveTextContent('Linked to Spinach');
+  });
+});
+
+describe('Recipe screen: per-ingredient nutrition and stated nutrition (13A.1)', () => {
+  const R = 'cccccccc-1111-4000-8000-000000000001';
+  const V = 'cccccccc-1111-4000-8000-0000000000v1';
+  const entry = (key: string, value: number | null, coverage: 'complete' | 'partial' | 'unavailable', resolved = 1, count = 1) => ({
+    nutrient_key: key, value, is_zero: value === 0, below_output_precision: false, coverage, status: null, resolved_item_count: resolved, item_count: count,
+  });
+  const summary = (e: number | null, p: number | null, c: number | null, f: number | null, fi: number | null, coverage: 'complete' | 'partial' = 'complete', resolved = 1, count = 1) => ({
+    energy_kcal: entry('energy', e, e === null ? 'unavailable' : coverage, resolved, count),
+    protein_g: entry('protein', p, p === null ? 'unavailable' : coverage, resolved, count),
+    carbohydrate_g: entry('carbohydrate', c, c === null ? 'unavailable' : coverage, resolved, count),
+    fat_g: entry('fat', f, f === null ? 'unavailable' : coverage, resolved, count),
+    fiber_g: entry('fiber', fi, fi === null ? 'unavailable' : coverage, resolved, count),
+  });
+  const view = (energy: number) => ({ summary: summary(energy, 5.4, 56.4, 0.6, 0.8, 'partial', 1, 2), item_count: 2, nutrients: [] });
+  const recipeDetail = {
+    id: R,
+    title: 'Spinach Rice',
+    updated_at: '2026-11-02T00:00:00Z',
+    version_count: 1,
+    current_version: {
+      id: V, version_number: 1, is_current: true, title: 'Spinach Rice', description: null, servings: 2,
+      ingredients: [
+        { id: 'i1', position: 1, text: '200 g cooked rice', food_id: 'f1', serving_id: null, quantity: 200, unit: 'g', match_status: 'matched' },
+        { id: 'i2', position: 2, text: '2 cups spinach', food_id: SPINACH, serving_id: null, quantity: null, unit: null, match_status: 'needs_confirmation' },
+      ],
+      instructions: [],
+    },
+    imported_source: { url: LINK, provider: 'web', stated_nutrition: { basis: 'per_serving', serving_size: null, values: [{ field: 'calories', text: '320 kcal', amount: 320, unit: 'kcal' }] } },
+  };
+  const recipeNutrition = {
+    recipe_version_id: V, version_number: 1, servings: 2, ingredient_count: 2, calculated_ingredient_count: 1,
+    whole_recipe: view(260), per_serving: { servings: 2, ...view(130) }, per_serving_status: 'available',
+    ingredients: [
+      {
+        ingredient_id: 'i1', index: 0, nutrition_status: 'calculated',
+        calculation: {
+          summary: summary(260, 5.4, 56.4, 0.6, 0.8),
+          nutrients: [{ nutrient_key: 'iron', unit: 'mg', value: 2.4, is_zero: false, below_output_precision: false, status: 'resolved', source: { source: 'trusted_database', authority: 'trusted_reference' } }],
+        },
+      },
+      { ingredient_id: 'i2', index: 1, nutrition_status: 'food_needs_confirmation', calculation: null },
+    ],
+  };
+
+  it('shows each counted ingredient’s calories and macros, its nutrients on tap, why others are not counted, and the source’s stated nutrition apart', async () => {
+    await renderApp(<RecipeScreen recipeId={R} />, {
+      routes: {
+        'GET /v1/profiles': profiles(),
+        [`GET /v1/profiles/${PROFILE_A}/recipes/${R}`]: () => json(200, recipeDetail),
+        [`GET /v1/profiles/${PROFILE_A}/recipes/${R}/nutrition`]: () => json(200, recipeNutrition),
+      },
+    });
+    expect(await screen.findByTestId('ingredient-nutrition-i1')).toHaveTextContent('260 kcal · protein 5.4 g · carbohydrate 56.4 g · fat 0.6 g · fiber 0.8 g');
+    expect(screen.queryByTestId('ingredient-nutrition-i2')).toBeNull();
+    expect(screen.getByTestId('ingredient-status-i2')).toHaveTextContent('Not counted in nutrition: the food match is not confirmed');
+    await fireEvent.press(screen.getByTestId('ingredient-details-i1-toggle'));
+    expect(await screen.findByTestId('ingredient-details-i1-list')).toHaveTextContent(/Iron/);
+    expect(screen.getByTestId('recipe-source')).toHaveTextContent('Imported from kitchen.example.com');
+    expect(screen.getByTestId('stated-nutrition')).toHaveTextContent(/not used in the nutrition calculated above/);
+    expect(screen.getByTestId('recipe-summary-amount-energy_kcal')).toHaveTextContent('130 kcal');
   });
 });

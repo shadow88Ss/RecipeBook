@@ -166,6 +166,11 @@ export function RecipeForm({ recipe, onSaved, review }: { recipe: RecipeDetail |
           index={index}
           last={index === draft.ingredients.length - 1}
           onEdit={() => setEditing({ index, line })}
+          onConfirmSuggestion={
+            line.suggestion && !line.food
+              ? () => setEditing({ index, line: { ...line, food: { id: line.suggestion!.foodId, name: line.suggestion!.name }, suggestion: undefined } })
+              : undefined
+          }
           onRemove={() => set({ ingredients: draft.ingredients.filter((_, i) => i !== index) })}
           onMove={(by) => move(index, by)}
         />
@@ -216,6 +221,7 @@ function IngredientRow({
   onEdit,
   onRemove,
   onMove,
+  onConfirmSuggestion,
 }: {
   line: DraftIngredient;
   index: number;
@@ -223,14 +229,28 @@ function IngredientRow({
   onEdit: () => void;
   onRemove: () => void;
   onMove: (by: -1 | 1) => void;
+  onConfirmSuggestion?: () => void;
 }) {
-  const status = line.food ? t('recipeEdit.linked', { amount: amountSummary(line) ?? '' }) : line.unconfirmedSuggestion ? t('recipeEdit.unconfirmed') : t('recipeEdit.textOnly');
+  const status = line.food
+    ? t('recipeEdit.linked', { amount: amountSummary(line) ?? '' })
+    : line.suggestion
+      ? t('recipeImport.suggested', { name: line.suggestion.name })
+      : line.unconfirmedSuggestion
+        ? t('recipeEdit.unconfirmed')
+        : t('recipeEdit.textOnly');
+  const measureNote = !line.food && line.note === 'ambiguous_unit' ? t('recipeImport.note.ambiguousUnit') : line.note === 'range' && !line.food ? t('recipeImport.note.range') : null;
   return (
-    <Card testID={`draft-ingredient-${index}`} accessibilityLabel={`${line.text}. ${status}`}>
+    <Card testID={`draft-ingredient-${index}`} accessibilityLabel={[line.text, status, measureNote].filter(Boolean).join('. ')}>
       <Text>{line.text}</Text>
       <Text variant="small" testID={`draft-ingredient-status-${index}`}>
         {status}
       </Text>
+      {measureNote ? (
+        <Text variant="small" testID={`draft-ingredient-note-${index}`}>
+          {measureNote}
+        </Text>
+      ) : null}
+      {onConfirmSuggestion ? <Button label={t('recipeImport.confirmFood')} onPress={onConfirmSuggestion} testID={`confirm-suggestion-${index}`} /> : null}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.sm }}>
         <Button label={t('recipeEdit.edit')} variant="secondary" onPress={onEdit} testID={`edit-ingredient-${index}`} />
         <Button label={t('recipeEdit.remove')} variant="secondary" onPress={onRemove} testID={`remove-ingredient-${index}`} />
