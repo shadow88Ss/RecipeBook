@@ -28,6 +28,7 @@ import type { ScopedDbClient, ScopedDbFactory } from '../../lib/scopedDb';
 import type { AuthContext } from '../../types/express';
 import { recipeFromOrigin } from '../recipes/recipeOrigin';
 import { RECIPE_WRITE_SCOPES } from '../recipes/recipe.service';
+import { FOOD_SUGGESTION_METHOD, suggestFoods } from './foodSuggestion';
 import { PageFetchError, type PageFetcher } from './pageFetcher';
 import { EXTRACTION_METHOD, EXTRACTOR_VERSION, extractRecipeFromHtml, type RecipeDraft } from './recipeJsonLd';
 import type { RecipeImportCreateInput } from './recipeImport.schemas';
@@ -129,6 +130,14 @@ export class RecipeImportService {
         outcome = { status: 'permanently_failed', error_code: extraction.reason };
       } else {
         const excerpt = extraction.json_ld;
+        const suggestions = await suggestFoods(db, extraction.draft.ingredients.map((i) => i.text));
+        const draft: RecipeDraft = {
+          ...extraction.draft,
+          ingredients: extraction.draft.ingredients.map((ingredient, index) => {
+            const suggestion = suggestions[index];
+            return suggestion ? { ...ingredient, suggestion } : ingredient;
+          }),
+        };
         outcome = {
           status: 'needs_confirmation',
           content_fingerprint: `sha256:${createHash('sha256').update(JSON.stringify(excerpt)).digest('hex')}`,
@@ -138,7 +147,7 @@ export class RecipeImportService {
             model_version: EXTRACTOR_VERSION,
             confidence: extraction.confidence,
             status: extraction.status,
-            payload: { draft: extraction.draft, final_url: page.finalUrl },
+            payload: { draft, final_url: page.finalUrl, suggestion_method: FOOD_SUGGESTION_METHOD },
           },
         };
       }

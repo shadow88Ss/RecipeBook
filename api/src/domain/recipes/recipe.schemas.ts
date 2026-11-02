@@ -34,30 +34,44 @@ const descriptionSchema = z.string().trim().max(5000);
 export const servingsSchema = z.number().finite().positive().max(MAX_RECIPE_SERVINGS);
 const instructionSchema = z.string().trim().min(1).max(5000);
 
-export const recipeIngredientInputSchema = z
+const recipeIngredientFields = {
+  /** The ingredient line as the user wrote it ("125 g chicken breast,
+   * diced") — stored as raw_ingredient_text, never rewritten. */
+  text: z.string().trim().min(1).max(500),
+  /** The canonical Food the user selected. Omit to keep the ingredient
+   * unresolved — it is stored as text only, never force-matched. */
+  food_id: z.uuid().optional(),
+  serving_id: z.uuid().optional(),
+  quantity: quantitySchema.optional(),
+  unit: unitCodeSchema.optional(),
+};
+
+function checkIngredientAmount(value: { food_id?: string | undefined; serving_id?: string | undefined; quantity?: number | undefined; unit?: string | undefined }, ctx: z.RefinementCtx<unknown>) {
+  if (value.unit !== undefined && value.serving_id !== undefined) {
+    ctx.addIssue({ code: 'custom', path: ['serving_id'], message: 'Provide at most one of unit or serving_id.' });
+  }
+  if (value.serving_id !== undefined && value.food_id === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['serving_id'], message: 'serving_id requires food_id (the serving must belong to that food).' });
+  }
+  if ((value.unit !== undefined || value.serving_id !== undefined) && value.quantity === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['quantity'], message: 'quantity is required with unit or serving_id.' });
+  }
+}
+
+export const recipeIngredientInputSchema = z.object(recipeIngredientFields).superRefine(checkIngredientAmount);
+export type RecipeIngredientInput = z.infer<typeof recipeIngredientInputSchema> & { suggested_food_id?: string; suggestion_confidence?: number };
+
+/** Layer 13A.1 — saving an import: a line may carry the import's food
+ * suggestion the user has NOT confirmed. It is stored `needs_confirmation`
+ * with its confidence and is not counted until confirmed. A confirmed food
+ * (`food_id`) always wins over a suggestion. */
+export const importIngredientInputSchema = z
   .object({
-    /** The ingredient line as the user wrote it ("125 g chicken breast,
-     * diced") — stored as raw_ingredient_text, never rewritten. */
-    text: z.string().trim().min(1).max(500),
-    /** The canonical Food the user selected. Omit to keep the ingredient
-     * unresolved — it is stored as text only, never force-matched. */
-    food_id: z.uuid().optional(),
-    serving_id: z.uuid().optional(),
-    quantity: quantitySchema.optional(),
-    unit: unitCodeSchema.optional(),
+    ...recipeIngredientFields,
+    suggested_food_id: z.uuid().optional(),
+    suggestion_confidence: z.number().min(0).max(1).optional(),
   })
-  .superRefine((value, ctx) => {
-    if (value.unit !== undefined && value.serving_id !== undefined) {
-      ctx.addIssue({ code: 'custom', path: ['serving_id'], message: 'Provide at most one of unit or serving_id.' });
-    }
-    if (value.serving_id !== undefined && value.food_id === undefined) {
-      ctx.addIssue({ code: 'custom', path: ['serving_id'], message: 'serving_id requires food_id (the serving must belong to that food).' });
-    }
-    if ((value.unit !== undefined || value.serving_id !== undefined) && value.quantity === undefined) {
-      ctx.addIssue({ code: 'custom', path: ['quantity'], message: 'quantity is required with unit or serving_id.' });
-    }
-  });
-export type RecipeIngredientInput = z.infer<typeof recipeIngredientInputSchema>;
+  .superRefine(checkIngredientAmount);
 
 const ingredientsSchema = z.array(recipeIngredientInputSchema).min(1).max(MAX_RECIPE_INGREDIENTS);
 const instructionsSchema = z.array(instructionSchema).max(MAX_RECIPE_INSTRUCTIONS);

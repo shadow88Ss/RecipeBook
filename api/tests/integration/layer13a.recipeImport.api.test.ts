@@ -33,7 +33,17 @@ const recipePage = (name: string) => `<html><head><script type="application/ld+j
   ],
 })}</script></head><body></body></html>`;
 
+const nutritionPage = `<html><head><script type="application/ld+json">${JSON.stringify({
+  '@type': 'Recipe',
+  name: 'Spinach Rice',
+  recipeYield: '2 servings',
+  recipeIngredient: ['200 g cooked rice', '2 cups fresh spinach, washed', '1 egg'],
+  recipeInstructions: ['Cook.'],
+  nutrition: { '@type': 'NutritionInformation', servingSize: '1 bowl', calories: '320 calories', proteinContent: '12 g', fatContent: '9g', sodiumContent: '1,200 mg' },
+})}</script></head></html>`;
+
 const PAGES: Record<string, string | PageFetchError> = {
+  'https://kitchen.example-recipes.com/spinach-rice': nutritionPage,
   'https://kitchen.example-recipes.com/rice-bowl': recipePage('Fixture Rice Bowl'),
   'https://kitchen.example-recipes.com/rice-bowl?utm_source=insta': recipePage('Fixture Rice Bowl'),
   'https://kitchen.example-recipes.com/other': recipePage('Other Dish'),
@@ -90,6 +100,8 @@ beforeAll(async () => {
   pool = await rebuildTestDatabase('recipebook_api_test_layer13a');
   await seedScenario(pool);
   await seedNutritionFixtures(pool);
+  // Display names the food search finds (test fixtures only).
+  await pool.query("insert into food_alias (food_id, locale, alias_text, is_primary, source) values ($1, 'en', 'Rice, cooked', true, 'trusted_database'), ($2, 'en', 'Spinach', true, 'trusted_database')", [F.rice, F.spinach]);
   app = createApp({
     profileRepository: new PgHarnessProfileRepository(pool),
     scopedDbFactory: new PgHarnessScopedDbFactory(pool),
@@ -283,5 +295,115 @@ describe('saving the reviewed recipe', () => {
         [own.body.id, SEED.accountB, rows[0].url_source_id],
       ),
     ).rejects.toMatchObject({ code: '23514' });
+  });
+});
+
+describe('nutrition of imported recipes (Layer 13A.1)', () => {
+  let nutritionImportId: string;
+  let nutritionRecipeId: string;
+
+  it('suggests a food for each line it can, without confirming any', async () => {
+    const res = await A().post(importsOf(SEED.profileA), { url: 'https://kitchen.example-recipes.com/spinach-rice' });
+    expect(res.status).toBe(201);
+    nutritionImportId = res.body.id;
+    const [rice, spinach, egg] = res.body.draft.ingredients;
+    // "cooked rice" has no direct match; its head word "rice" finds "Rice, cooked" (weaker).
+    expect(rice).toMatchObject({ text: '200 g cooked rice', quantity: 200, unit: 'g', suggestion: { food_id: F.rice, name: 'Rice, cooked', match_kind: 'prefix', term: 'rice', confidence: 0.45 } });
+    expect(spinach).toMatchObject({ note: 'ambiguous_unit', suggestion: { food_id: F.spinach, name: 'Spinach', match_kind: 'exact', term: 'spinach', confidence: 0.8 } });
+    expect(egg.suggestion).toBeUndefined();
+  });
+
+  it("keeps the page's own nutrition separately, as written", async () => {
+    const res = await A().get(`${importsOf(SEED.profileA)}/${nutritionImportId}`);
+    expect(res.body.draft.source_nutrition).toEqual({
+      basis: 'per_serving',
+      serving_size: '1 bowl',
+      values: [
+        { field: 'calories', text: '320 calories', amount: 320, unit: 'kcal' },
+        { field: 'proteinContent', text: '12 g', amount: 12, unit: 'g' },
+        { field: 'fatContent', text: '9g', amount: 9, unit: 'g' },
+        { field: 'sodiumContent', text: '1,200 mg', amount: 1200, unit: 'mg' },
+      ],
+    });
+  });
+
+  it('counts confirmed foods per ingredient and in the totals, and never counts an unconfirmed suggestion', async () => {
+    const save = await A().post(`${importsOf(SEED.profileA)}/${nutritionImportId}/save`, {
+      title: 'Spinach Rice',
+      servings: 2,
+      ingredients: [
+        { text: '200 g cooked rice', food_id: F.rice, quantity: 200, unit: 'g' },
+        { text: '2 cups fresh spinach, washed', suggested_food_id: F.spinach, suggestion_confidence: 0.8 },
+        { text: '1 egg', quantity: 1 },
+      ],
+      instructions: ['Cook.'],
+    });
+    expect(save.status).toBe(201);
+    nutritionRecipeId = save.body.id;
+    expect(save.body.current_version.ingredients.map((i: { match_status: string; food_id: string | null; match_confidence: number | null }) => [i.match_status, i.food_id, i.match_confidence])).toEqual([
+      ['matched', F.rice, null],
+      ['needs_confirmation', F.spinach, 0.8],
+      ['unmatched', null, null],
+    ]);
+
+    const n = await A().get(`/v1/profiles/${SEED.profileA}/recipes/${nutritionRecipeId}/nutrition`);
+    expect(n.status).toBe(200);
+    expect(n.body).toMatchObject({ ingredient_count: 3, calculated_ingredient_count: 1, per_serving_status: 'available' });
+    const [rice, spinach, egg] = n.body.ingredients;
+    expect(rice.nutrition_status).toBe('calculated');
+    expect(rice.calculation.summary).toMatchObject({
+      energy_kcal: { value: 260, coverage: 'complete' },
+      protein_g: { value: 5.4 },
+      carbohydrate_g: { value: 56.4 },
+      fat_g: { value: 0.6 },
+      fiber_g: { value: 0.8 },
+    });
+    const iron = rice.calculation.nutrients.find((x: { nutrient_key: string }) => x.nutrient_key === 'iron');
+    expect(iron).toMatchObject({ value: 2.4, unit: 'mg', status: 'resolved' });
+    expect(spinach).toMatchObject({ nutrition_status: 'food_needs_confirmation', calculation: null });
+    expect(egg).toMatchObject({ nutrition_status: 'food_unmatched', calculation: null });
+    // Totals: only the rice is counted, so they are partial, never padded.
+    expect(n.body.whole_recipe.summary.energy_kcal).toMatchObject({ value: 260, coverage: 'partial', resolved_item_count: 1, item_count: 3 });
+    expect(n.body.per_serving.summary.energy_kcal).toMatchObject({ value: 130, coverage: 'partial' });
+  });
+
+  it('a confirmed suggestion then counts with its amount', async () => {
+    const res = await A().patch(`/v1/profiles/${SEED.profileA}/recipes/${nutritionRecipeId}`, {
+      ingredients: [
+        { text: '200 g cooked rice', food_id: F.rice, quantity: 200, unit: 'g' },
+        { text: '2 cups fresh spinach, washed', food_id: F.spinach, quantity: 60, unit: 'g' },
+        { text: '1 egg', quantity: 1 },
+      ],
+    });
+    expect(res.status).toBe(200);
+    const n = await A().get(`/v1/profiles/${SEED.profileA}/recipes/${nutritionRecipeId}/nutrition`);
+    expect(n.body.calculated_ingredient_count).toBe(2);
+    expect(n.body.ingredients[1].nutrition_status).toBe('calculated');
+  });
+
+  it('shows the source and its stated nutrition apart from the calculated nutrition', async () => {
+    const res = await A().get(`/v1/profiles/${SEED.profileA}/recipes/${nutritionRecipeId}`);
+    expect(res.body.imported_source).toMatchObject({
+      url: 'https://kitchen.example-recipes.com/spinach-rice',
+      provider: 'web',
+      stated_nutrition: { basis: 'per_serving', serving_size: '1 bowl' },
+    });
+    // A manual recipe has none.
+    const manual = await A().post(`/v1/profiles/${SEED.profileA}/recipes`, reviewed('Manual'));
+    expect(manual.body.imported_source).toBeNull();
+  });
+
+  it('a plain recipe create cannot store a suggestion', async () => {
+    const res = await A().post(`/v1/profiles/${SEED.profileA}/recipes`, { title: 'X', servings: 1, ingredients: [{ text: 'spinach', suggested_food_id: F.spinach }] });
+    expect(res.status).toBe(201);
+    expect(res.body.current_version.ingredients[0]).toMatchObject({ match_status: 'unmatched', food_id: null });
+  });
+
+  it('refuses a suggestion that is not a real food', async () => {
+    const again = await A().post(importsOf(SEED.profileA), { url: 'https://kitchen.example-recipes.com/other' });
+    const res = await A().post(`${importsOf(SEED.profileA)}/${again.body.id}/save`, {
+      title: 'Other', servings: 1, ingredients: [{ text: 'x', suggested_food_id: 'ffffffff-0000-4000-8000-000000000000' }],
+    });
+    expect(res.status).toBe(400);
   });
 });

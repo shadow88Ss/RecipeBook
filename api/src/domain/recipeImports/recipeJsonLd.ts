@@ -11,6 +11,7 @@
 // reading free text (captions, blog prose) is AI extraction work for a later
 // layer (Master §3: Claude interprets, deterministic services calculate).
 
+import type { FoodSuggestion } from './foodSuggestion';
 import { parseIngredientAmount, parseNumber, type ParsedIngredientAmount } from './ingredientLine';
 
 export const EXTRACTION_METHOD = 'schema_org_json_ld';
@@ -29,6 +30,9 @@ const MAX_JSON_LD_BLOCK_BYTES = 1_000_000;
 
 export interface DraftIngredient extends ParsedIngredientAmount {
   text: string;
+  /** Layer 13A.1 — a proposed Food, added by the import service; needs the
+   * user's confirmation before it counts. */
+  suggestion?: FoodSuggestion;
 }
 
 export interface RecipeDraft {
@@ -43,6 +47,45 @@ export interface RecipeDraft {
   author: string | null;
   /** Lists longer than the recipe limits were cut. */
   truncated: boolean;
+  /** Layer 13A.1 — the nutrition the page itself states (schema.org
+   * NutritionInformation), kept apart from anything the platform
+   * calculates. Never used in calculations. */
+  source_nutrition: SourceNutrition | null;
+}
+
+/** schema.org NutritionInformation properties, by their schema.org names
+ * (not platform nutrient keys: this is what the page claims, not a
+ * resolved nutrient). */
+export const SOURCE_NUTRITION_FIELDS = [
+  'calories',
+  'proteinContent',
+  'carbohydrateContent',
+  'fatContent',
+  'saturatedFatContent',
+  'unsaturatedFatContent',
+  'transFatContent',
+  'fiberContent',
+  'sugarContent',
+  'sodiumContent',
+  'cholesterolContent',
+] as const;
+export type SourceNutritionField = (typeof SOURCE_NUTRITION_FIELDS)[number];
+
+export interface SourceNutritionValue {
+  field: SourceNutritionField;
+  /** The value exactly as the page wrote it ("12 g", "240 calories"). */
+  text: string;
+  /** The number read from `text`; null when there is none. */
+  amount: number | null;
+  /** The unit as written, normalized to lower case ("g", "mg", "kcal"); null when not stated. */
+  unit: string | null;
+}
+
+export interface SourceNutrition {
+  /** schema.org states nutrition per serving; `serving_size` is the page's own wording, if any. */
+  basis: 'per_serving';
+  serving_size: string | null;
+  values: SourceNutritionValue[];
 }
 
 export type ExtractionResult =
@@ -76,6 +119,7 @@ export function extractRecipeFromHtml(html: string): ExtractionResult {
     image_url: readImageUrl(recipe.image),
     author: clip(readAuthor(recipe.author), MAX_TITLE) || null,
     truncated,
+    source_nutrition: readSourceNutrition(recipe.nutrition),
   };
 
   // Confidence is how complete the page's own data is, not a guess about
@@ -178,6 +222,32 @@ function readServings(value: unknown): { value: number | null; text: string | nu
     if (n !== null && n > 0 && n <= MAX_SERVINGS) return { value: Math.round(n * 100) / 100, text: candidate };
   }
   return { value: null, text: candidates[0] ? clip(candidates[0], MAX_TITLE) : null };
+}
+
+/** The page's own nutrition statement. Only listed properties are read,
+ * each value is kept as written, and the number/unit are read without any
+ * conversion ("1,200 mg" -> 1200 mg; "240 calories" -> 240 kcal). */
+export function readSourceNutrition(value: unknown): SourceNutrition | null {
+  const node = asArray(value).find((v): v is JsonObject => v !== null && typeof v === 'object' && !Array.isArray(v));
+  if (!node) return null;
+  const values: SourceNutritionValue[] = [];
+  for (const field of SOURCE_NUTRITION_FIELDS) {
+    const raw = node[field];
+    const text = clip(typeof raw === 'number' && Number.isFinite(raw) ? String(raw) : textOf(raw), 100);
+    if (!text) continue;
+    const match = /^(?:about|approx\.?|~)?\s*(\d{1,3}(?:,\d{3})+|\d+(?:[.,]\d+)?)\s*([a-zµμ]+)?/i.exec(text);
+    const number = match?.[1] ? Number(/^\d{1,3}(,\d{3})+$/.test(match[1]) ? match[1].replace(/,/g, '') : match[1].replace(',', '.')) : null;
+    const amount = number !== null && Number.isFinite(number) && number >= 0 && number <= 100_000 ? number : null;
+    let unit = match?.[2]?.toLowerCase() ?? null;
+    if (unit === 'calories' || unit === 'calorie' || unit === 'cal' || unit === 'kcals') unit = 'kcal';
+    if (unit === 'grams' || unit === 'gram') unit = 'g';
+    if (unit === 'milligrams' || unit === 'milligram') unit = 'mg';
+    if (field === 'calories' && unit === null && amount !== null) unit = 'kcal';
+    values.push({ field, text, amount, unit });
+  }
+  if (values.length === 0) return null;
+  const servingSize = clip(textOf(node.servingSize), 200) || null;
+  return { basis: 'per_serving', serving_size: servingSize, values };
 }
 
 function readImageUrl(value: unknown): string | null {

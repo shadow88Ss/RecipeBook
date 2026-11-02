@@ -4,7 +4,8 @@ import { gzipSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { parseIngredientAmount } from '../../src/domain/recipeImports/ingredientLine';
 import { createPageFetcher, PageFetchError } from '../../src/domain/recipeImports/pageFetcher';
-import { cleanText, extractRecipeFromHtml } from '../../src/domain/recipeImports/recipeJsonLd';
+import { foodSearchTerm } from '../../src/domain/recipeImports/foodSuggestion';
+import { cleanText, extractRecipeFromHtml, readSourceNutrition } from '../../src/domain/recipeImports/recipeJsonLd';
 import { canonicalizeSourceUrl, isBlockedAddress } from '../../src/domain/recipeImports/sourceUrl';
 
 describe('canonicalizeSourceUrl', () => {
@@ -124,6 +125,7 @@ describe('extractRecipeFromHtml', () => {
       image_url: 'https://cdn.example.com/a.jpg',
       author: 'Sam Cook',
       truncated: false,
+      source_nutrition: null,
     });
     expect(result.confidence).toBeGreaterThan(0.9);
   });
@@ -260,5 +262,42 @@ describe('createPageFetcher', () => {
   it('never connects to loopback without the test seam, even when DNS is spoofed', async () => {
     const fetcher = createPageFetcher({ resolve: loopbackAsPublic('127.0.0.1') });
     await expect(fetcher.fetchPage('http://site.example-recipes.com/recipe')).rejects.toMatchObject({ code: 'address_not_allowed' });
+  });
+});
+
+describe('foodSearchTerm (Layer 13A.1)', () => {
+  it.each([
+    ['2 cups finely chopped fresh spinach, washed', 'spinach'],
+    ['200g cooked rice', 'cooked rice'],
+    ['1 ½ tbsp. extra virgin olive oil', 'virgin olive oil'],
+    ['3 cloves garlic (minced)', 'garlic'],
+    ['2 (14 oz) cans diced tomatoes', 'tomatoes'],
+    ['Salt and pepper to taste', 'salt pepper'],
+    ['1 large egg, beaten', 'egg'],
+    ['500 g chicken thighs - skinless', 'chicken thighs'],
+    ['1/2 tsp', ''],
+  ])('%s -> %s', (line, term) => {
+    expect(foodSearchTerm(line)).toBe(term);
+  });
+});
+
+describe('readSourceNutrition (Layer 13A.1)', () => {
+  it('keeps each stated value as written, with its number and unit', () => {
+    expect(readSourceNutrition({ '@type': 'NutritionInformation', calories: 410, carbohydrateContent: '52.5 grams', fiberContent: 'about 4g', sugarContent: '', servingSize: '1 slice' })).toEqual({
+      basis: 'per_serving',
+      serving_size: '1 slice',
+      values: [
+        { field: 'calories', text: '410', amount: 410, unit: 'kcal' },
+        { field: 'carbohydrateContent', text: '52.5 grams', amount: 52.5, unit: 'g' },
+        { field: 'fiberContent', text: 'about 4g', amount: 4, unit: 'g' },
+      ],
+    });
+  });
+  it('keeps a value it cannot read as text only', () => {
+    expect(readSourceNutrition({ proteinContent: 'n/a' })?.values).toEqual([{ field: 'proteinContent', text: 'n/a', amount: null, unit: null }]);
+  });
+  it('is null when the page states nothing', () => {
+    expect(readSourceNutrition(undefined)).toBeNull();
+    expect(readSourceNutrition({ '@type': 'NutritionInformation' })).toBeNull();
   });
 });

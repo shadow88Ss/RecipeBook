@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { profileIdParamSchema } from '../profiles/profile.schemas';
-import { recipeCreateSchema } from '../recipes/recipe.schemas';
+import { importIngredientInputSchema, MAX_RECIPE_INGREDIENTS, recipeCreateSchema } from '../recipes/recipe.schemas';
 import { MAX_SOURCE_URL_LENGTH } from './sourceUrl';
 
 export const recipeImportCreateSchema = z.object({
@@ -16,7 +16,9 @@ export type RecipeImportCreateInput = z.infer<typeof recipeImportCreateSchema>;
 
 /** Saving takes the reviewed recipe in the normal recipe create shape: the
  * user's edits are what is saved, the extraction stays as provenance. */
-export const recipeImportSaveSchema = recipeCreateSchema;
+export const recipeImportSaveSchema = recipeCreateSchema.extend({
+  ingredients: z.array(importIngredientInputSchema).min(1).max(MAX_RECIPE_INGREDIENTS),
+});
 export type RecipeImportSaveInput = z.infer<typeof recipeImportSaveSchema>;
 
 export const recipeImportIdParamSchema = profileIdParamSchema.extend({

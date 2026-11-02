@@ -270,6 +270,7 @@ export class RecipeService {
       version_count: versions.length,
       current_version: current ? toVersionDto(current, recipe.current_version_id) : null,
       nutrition: current ? toRecipeNutritionDto(await recipeVersionNutrition(db, current), { includeIngredients: false }) : null,
+      imported_source: current ? await importedSource(db, current.version) : null,
     };
   }
 
@@ -277,7 +278,7 @@ export class RecipeService {
    * user-confirmed match (`matched`); no Food means `unmatched` text. Every
    * referenced Food must exist and every serving must belong to its Food. */
   private async resolveIngredientInputs(db: ScopedDbClient, inputs: readonly RecipeIngredientInput[]): Promise<IngredientContent[]> {
-    const foodIds = [...new Set(inputs.flatMap((i) => (i.food_id ? [i.food_id] : [])))];
+    const foodIds = [...new Set(inputs.flatMap((i) => [i.food_id, i.food_id ? undefined : i.suggested_food_id].filter((id): id is string => !!id)))];
     const servingIds = [...new Set(inputs.flatMap((i) => (i.serving_id ? [i.serving_id] : [])))];
     const [foods, servings] = await Promise.all([
       foodIds.length ? db.select<{ id: string }>('food', { columns: 'id', in: { id: foodIds } }) : Promise.resolve([]),
@@ -291,22 +292,51 @@ export class RecipeService {
       if (input.food_id && !knownFoods.has(input.food_id)) {
         issues.push({ path: `ingredients.${index}.food_id`, message: 'Food not found.' });
       }
+      if (!input.food_id && input.suggested_food_id && !knownFoods.has(input.suggested_food_id)) {
+        issues.push({ path: `ingredients.${index}.suggested_food_id`, message: 'Food not found.' });
+      }
       if (input.serving_id && servingFood.get(input.serving_id) !== input.food_id) {
         issues.push({ path: `ingredients.${index}.serving_id`, message: 'serving_id does not exist for this food.' });
       }
     });
     if (issues.length) throw AppError.validation('Invalid ingredient reference.', { issues });
 
-    return inputs.map((input): IngredientContent => ({
-      raw_ingredient_text: input.text,
-      food_id: input.food_id ?? null,
-      food_serving_id: input.serving_id ?? null,
-      quantity: input.quantity ?? null,
-      unit: input.unit ?? null,
-      match_status: input.food_id ? 'matched' : 'unmatched',
-      match_confidence: null,
-    }));
+    return inputs.map((input): IngredientContent => {
+      // An unconfirmed suggestion (import only) is kept as a proposal:
+      // needs_confirmation is never counted by the nutrition engine.
+      const suggested = !input.food_id && input.suggested_food_id ? input.suggested_food_id : null;
+      return {
+        raw_ingredient_text: input.text,
+        food_id: input.food_id ?? suggested,
+        food_serving_id: input.serving_id ?? null,
+        quantity: input.quantity ?? null,
+        unit: input.unit ?? null,
+        match_status: input.food_id ? 'matched' : suggested ? 'needs_confirmation' : 'unmatched',
+        match_confidence: suggested ? (input.suggestion_confidence ?? null) : null,
+      };
+    });
   }
+}
+
+/** Layer 13A.1 — where an imported version came from, and the nutrition the
+ * source page itself stated. Kept apart from the calculated `nutrition`
+ * and never used in it. Readable only by the Account that ran the import
+ * (import_job / ai_extraction RLS); anyone else gets null. */
+async function importedSource(db: ScopedDbClient, version: RecipeVersionRow) {
+  if (!version.origin_import_job_id) return null;
+  const [source, extractions] = await Promise.all([
+    db.rpc<{ canonical_url: string; provider: string } | null>('url_recipe_import_source', { p_import_job_id: version.origin_import_job_id }).catch(() => null),
+    version.origin_ai_extraction_id
+      ? db.select<{ extracted_payload: { draft?: { source_nutrition?: unknown } } | null }>('ai_extraction', { columns: 'extracted_payload', eq: { id: version.origin_ai_extraction_id }, limit: 1 })
+      : Promise.resolve([]),
+  ]);
+  if (!source) return null;
+  return {
+    url: source.canonical_url,
+    provider: source.provider,
+    /** As stated by the page (schema.org NutritionInformation), per serving; not verified. */
+    stated_nutrition: extractions[0]?.extracted_payload?.draft?.source_nutrition ?? null,
+  };
 }
 
 async function existingFromSameSource(db: ScopedDbClient, importJobId: string, profileId: string): Promise<string | null> {
