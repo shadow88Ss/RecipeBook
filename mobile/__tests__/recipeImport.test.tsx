@@ -308,3 +308,116 @@ describe('Recipe screen: per-ingredient nutrition and stated nutrition (13A.1)',
     expect(screen.getByTestId('recipe-summary-amount-energy_kcal')).toHaveTextContent('130 kcal');
   });
 });
+
+// ---- Layer 13B — matched foods, amounts and a live nutrition preview -------
+
+describe('Imported recipe: automatic matches and live nutrition (13B)', () => {
+  const EGG = 'bbbbbbbb-1111-4000-8000-0000000000e1';
+  const EGG_LARGE = 'bbbbbbbb-1111-4000-8000-0000000000s1';
+  const SPINACH_CUP = 'bbbbbbbb-1111-4000-8000-0000000000s2';
+  const COOKED = 'bbbbbbbb-1111-4000-8000-0000000000f2';
+  const COOKED_CUP = 'bbbbbbbb-1111-4000-8000-0000000000s3';
+  const PREVIEW = `POST /v1/profiles/${PROFILE_A}/recipes/nutrition-preview`;
+
+  const draft13b = () => {
+    const base = imported();
+    return {
+      ...base,
+      draft: {
+        ...base.draft!,
+        ingredients: [
+          {
+            text: '3 large eggs',
+            quantity: 3,
+            suggestion: { food_id: EGG, name: 'Egg, whole, raw, fresh', confidence: 1, auto: true, reasons: ['state_assumed'], state: { line: null, food: 'raw' }, amount: { quantity: 3, serving_id: EGG_LARGE, serving_description: '1 large', grams: 150, assumptions: [] }, alternatives: [] },
+          },
+          {
+            text: '2 cups spinach',
+            note: 'ambiguous_unit',
+            suggestion: {
+              food_id: SPINACH, name: 'Spinach, raw', confidence: 1, auto: true, reasons: [], state: { line: null, food: 'raw' },
+              amount: { quantity: 2, serving_id: SPINACH_CUP, serving_description: '1 cup', grams: 60, assumptions: ['us_measure'] },
+              alternatives: [{ food_id: COOKED, name: 'Spinach, cooked', state: 'cooked', confidence: 0.7, amount: { quantity: 2, serving_id: COOKED_CUP, serving_description: '1 cup', grams: 360, assumptions: ['us_measure'] } }],
+            },
+          },
+          { text: '1 cup rice', suggestion: { food_id: 'r1', name: 'Rice, white, raw', confidence: 0.9, auto: false, reasons: ['ambiguous'], state: { line: null, food: 'raw' }, amount: { quantity: 1, serving_id: 'rs1', serving_description: '1 cup', grams: 185, assumptions: ['us_measure'] }, alternatives: [] } },
+          { text: '1 bunch dill' },
+        ],
+      },
+    };
+  };
+
+  const kcal = (value: number | null) => ({ nutrient_key: 'energy', value, is_zero: value === 0, below_output_precision: false, coverage: value === null ? 'unavailable' : 'partial', status: null, resolved_item_count: 2, item_count: 4 });
+  const summary = (e: number | null) => ({ energy_kcal: kcal(e), protein_g: kcal(null), carbohydrate_g: kcal(null), fat_g: kcal(null), fiber_g: kcal(null) });
+  const line = (index: number, e: number | null) => ({ ingredient_id: String(index), index, nutrition_status: e === null ? 'food_needs_confirmation' : 'calculated', calculation: e === null ? null : { summary: summary(e), nutrients: [] } });
+  const previewBody = (eggs: number, spinach: number, servings: number) => ({
+    servings, ingredient_count: 4, calculated_ingredient_count: 2,
+    whole_recipe: { summary: summary(eggs + spinach), item_count: 4, nutrients: [] },
+    per_serving: { servings, summary: summary((eggs + spinach) / servings), item_count: 4, nutrients: [] },
+    per_serving_status: 'available',
+    ingredients: [line(0, eggs), line(1, spinach), line(2, null), { ingredient_id: '3', index: 3, nutrition_status: 'food_unmatched', calculation: null }],
+  });
+
+  it('pre-links clear matches with their amount and assumptions, flags the rest, and shows the server’s nutrition while reviewing', async () => {
+    const previews: Call[] = [];
+    const saved: Call[] = [];
+    await renderApp(<RecipeImportScreen onSaved={jest.fn()} onOpenRecipe={jest.fn()} />, {
+      routes: {
+        'GET /v1/profiles': profiles(),
+        [`POST ${PATH}`]: () => json(201, draft13b()),
+        [PREVIEW]: (call) => {
+          previews.push(call);
+          const body = call.body as { servings: number; ingredients: { serving_id?: string; quantity?: number }[] };
+          return json(200, previewBody(body.ingredients[0]!.quantity! * 71.5, body.ingredients[1]!.serving_id === COOKED_CUP ? 82.8 : 13.8, body.servings));
+        },
+        [`POST ${PATH}/${IMPORT}/save`]: (call) => {
+          saved.push(call);
+          return json(201, savedRecipe);
+        },
+      },
+    });
+    await fireEvent.changeText(await screen.findByTestId('import-url'), LINK);
+    await fireEvent.press(screen.getByTestId('import-submit'));
+
+    expect(await screen.findByTestId('draft-ingredient-status-0')).toHaveTextContent('Matched automatically to Egg, whole, raw, fresh · 3 × 1 large. Check before saving.');
+    expect(screen.getByTestId('draft-ingredient-flag-0-0')).toHaveTextContent(/as bought \(raw\)/);
+    expect(screen.getByTestId('draft-ingredient-flag-1-0')).toHaveTextContent('Measured as US cups and spoons.');
+    expect(screen.queryByTestId('draft-ingredient-note-1')).toBeNull();
+    expect(screen.getByTestId('draft-ingredient-status-2')).toHaveTextContent(/^Suggested food: Rice, white, raw/);
+    expect(screen.getByTestId('draft-ingredient-flag-2-0')).toHaveTextContent(/Several foods fit/);
+    expect(screen.getByTestId('draft-ingredient-review-3')).toHaveTextContent(/No food found/);
+
+    // The server's nutrition for the form, per serving and per line.
+    expect(await screen.findByTestId('draft-ingredient-nutrition-0')).toHaveTextContent(/214\.5 kcal/);
+    expect(screen.getByTestId('recipe-summary-amount-energy_kcal')).toHaveTextContent('57.1 kcal');
+    expect(previews[0]!.body).toEqual({
+      servings: 4,
+      ingredients: [
+        { text: '3 large eggs', food_id: EGG, quantity: 3, serving_id: EGG_LARGE },
+        { text: '2 cups spinach', food_id: SPINACH, quantity: 2, serving_id: SPINACH_CUP },
+        { text: '1 cup rice', suggested_food_id: 'r1', suggestion_confidence: 0.9 },
+        { text: '1 bunch dill' },
+      ],
+    });
+
+    // Choosing the cooked form recalculates.
+    await fireEvent.press(screen.getByTestId('alternative-1-0'));
+    await waitFor(() => expect(screen.getByTestId('draft-ingredient-nutrition-1')).toHaveTextContent(/82\.8 kcal/));
+    // Changing servings recalculates per serving.
+    await fireEvent.changeText(screen.getByTestId('recipe-servings-input'), '2');
+    await waitFor(() => expect(screen.getByTestId('recipe-summary-amount-energy_kcal')).toHaveTextContent('148.7 kcal'));
+
+    // Confirming the rice suggestion applies its amount without another step.
+    await fireEvent.press(screen.getByTestId('confirm-suggestion-2'));
+    expect(screen.getByTestId('draft-ingredient-status-2')).toHaveTextContent('Linked to a food · 1 × 1 cup');
+
+    await fireEvent.press(screen.getByTestId('recipe-save'));
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect((saved[0]!.body as { ingredients: unknown[] }).ingredients).toEqual([
+      { text: '3 large eggs', food_id: EGG, quantity: 3, serving_id: EGG_LARGE },
+      { text: '2 cups spinach', food_id: COOKED, quantity: 2, serving_id: COOKED_CUP },
+      { text: '1 cup rice', food_id: 'r1', quantity: 1, serving_id: 'rs1' },
+      { text: '1 bunch dill' },
+    ]);
+  });
+});

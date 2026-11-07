@@ -83,6 +83,11 @@ export const recipeNutritionSchema = z.object({
 });
 export type RecipeNutrition = z.infer<typeof recipeNutritionSchema>;
 
+/** Layer 13B — POST .../recipes/nutrition-preview: the same calculation for an
+ * unsaved form (nothing is stored). `ingredient_id` is the line's position. */
+export const recipeNutritionPreviewSchema = recipeNutritionSchema.omit({ recipe_version_id: true, version_number: true });
+export type RecipeNutritionPreview = z.infer<typeof recipeNutritionPreviewSchema>;
+
 /** GET /v1/profiles/{id}/recipes/{recipe_id} */
 export const recipeDetailSchema = z.object({
   id: z.string(),

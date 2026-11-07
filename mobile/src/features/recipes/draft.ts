@@ -11,7 +11,7 @@
 //     how a user confirms a match. If the list changes, such a line is sent as
 //     text only, and the form says so first.
 
-import type { ImportDraft } from '../../api/contracts/recipeImports';
+import type { ImportDraft, ImportDraftIngredient, SuggestedAmount } from '../../api/contracts/recipeImports';
 import type { RecipeIngredient, RecipeIngredientInput, RecipeVersion, RecipeWrite } from '../../api/contracts/recipes';
 import type { FoodAmount } from '../food/FoodAmount';
 import { parseQuantity } from '../log/LogItemScreen';
@@ -27,10 +27,34 @@ export interface DraftIngredient {
   amount: DraftAmount | null;
   /** Stored line whose match was proposed but never confirmed. */
   unconfirmedSuggestion: boolean;
-  /** Layer 13A.1 — an import's proposed Food, not yet confirmed. */
-  suggestion?: { foodId: string; name: string; confidence: number };
+  /** Layer 13A.1 — an import's proposed Food, not yet confirmed. Layer 13B:
+   * with the amount the server built from that Food's servings, why it is not
+   * certain, and close alternatives (e.g. the cooked form). */
+  suggestion?: DraftSuggestion;
   /** Layer 13A.1 — why the import left the amount empty (e.g. `ambiguous_unit`). */
   note?: string;
+  /** Layer 13B — the Food was linked automatically by the import (a clear
+   * match); saving the reviewed form confirms it. Cleared once the user edits
+   * the line. Kept to show what was assumed. */
+  auto?: { reasons: string[]; assumptions: string[]; alternatives: DraftAlternative[] };
+}
+
+export interface DraftAlternative {
+  foodId: string;
+  name: string;
+  state: string | null;
+  amount: DraftAmount | null;
+  assumptions: string[];
+}
+
+export interface DraftSuggestion {
+  foodId: string;
+  name: string;
+  confidence: number;
+  amount?: DraftAmount | null;
+  assumptions?: string[];
+  reasons?: string[];
+  alternatives?: DraftAlternative[];
 }
 
 export interface RecipeDraft {
@@ -69,25 +93,48 @@ export function draftFromVersion(version: RecipeVersion): RecipeDraft {
   };
 }
 
+/** Layer 13B — a server-built amount as a form amount. */
+export function amountFromSuggestion(a: SuggestedAmount | null | undefined): DraftAmount | null {
+  if (!a) return null;
+  if (a.serving_id) return { kind: 'serving', quantity: a.quantity, servingId: a.serving_id, label: a.serving_description ?? null };
+  if (a.unit) return { kind: 'unit', quantity: a.quantity, unit: a.unit };
+  return null;
+}
+
+function draftLineFromImport(i: ImportDraftIngredient): DraftIngredient {
+  const parsed: DraftAmount | null = i.quantity === undefined ? null : i.unit ? { kind: 'unit', quantity: i.quantity, unit: i.unit } : { kind: 'count', quantity: i.quantity };
+  const base: DraftIngredient = { key: newKey(), text: i.text, food: null, amount: parsed, unconfirmedSuggestion: false, ...(i.note ? { note: i.note } : {}) };
+  const s = i.suggestion;
+  if (!s) return base;
+  const alternatives: DraftAlternative[] = s.alternatives.map((a) => ({ foodId: a.food_id, name: a.name, state: a.state, amount: amountFromSuggestion(a.amount), assumptions: a.amount?.assumptions ?? [] }));
+  const amount = amountFromSuggestion(s.amount);
+  // A clear match WITH a calculable amount is pre-linked; the user checks it while reviewing.
+  if (s.auto && amount) {
+    return { ...base, food: { id: s.food_id, name: s.name }, amount, auto: { reasons: s.reasons, assumptions: s.amount?.assumptions ?? [], alternatives } };
+  }
+  return {
+    ...base,
+    suggestion: { foodId: s.food_id, name: s.name, confidence: s.confidence, amount, assumptions: s.amount?.assumptions ?? [], reasons: s.reasons, alternatives },
+  };
+}
+
 /** Layer 13A — an imported recipe as a form draft. Amounts the server read
- * with certainty are kept (a unit, or a count); nothing is linked to a Food:
- * the user links foods while reviewing. */
+ * with certainty are kept (a unit, or a count). Layer 13B: a clear food match
+ * with an amount from that food's servings is pre-linked and marked as
+ * automatic; any other suggestion waits for the user to confirm it. */
 export function draftFromImport(imported: ImportDraft): RecipeDraft {
   return {
     title: imported.title,
     servingsText: imported.servings === null ? '' : String(imported.servings),
     description: imported.description ?? '',
-    ingredients: imported.ingredients.map((i) => ({
-      key: newKey(),
-      text: i.text,
-      food: null,
-      amount: i.quantity === undefined ? null : i.unit ? { kind: 'unit', quantity: i.quantity, unit: i.unit } : { kind: 'count', quantity: i.quantity },
-      unconfirmedSuggestion: false,
-      ...(i.suggestion ? { suggestion: { foodId: i.suggestion.food_id, name: i.suggestion.name, confidence: i.suggestion.confidence } } : {}),
-      ...(i.note ? { note: i.note } : {}),
-    })),
+    ingredients: imported.ingredients.map(draftLineFromImport),
     steps: [...imported.instructions],
   };
+}
+
+/** Layer 13B — a line with its suggestion (or an alternative) accepted, food and amount together. */
+export function acceptSuggestion(line: DraftIngredient, choice: { foodId: string; name: string; amount?: DraftAmount | null }): DraftIngredient {
+  return { ...line, food: { id: choice.foodId, name: choice.name }, amount: choice.amount ?? line.amount, suggestion: undefined, unconfirmedSuggestion: false };
 }
 
 export function toIngredientInput(d: DraftIngredient): RecipeIngredientInput {

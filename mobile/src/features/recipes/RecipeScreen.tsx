@@ -85,7 +85,7 @@ export function RecipeScreen({ recipeId, onEdit }: { recipeId: string; onEdit?: 
 
 type Basis = 'per_serving' | 'whole_recipe';
 
-export function RecipeNutritionView({ nutrition }: { nutrition: RecipeNutrition }) {
+export function RecipeNutritionView({ nutrition }: { nutrition: Pick<RecipeNutrition, 'per_serving' | 'whole_recipe' | 'ingredient_count' | 'calculated_ingredient_count'> }) {
   const perServing = nutrition.per_serving;
   const [chosen, setChosen] = useState<Basis>('per_serving');
   const basis: Basis = perServing ? chosen : 'whole_recipe';

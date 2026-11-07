@@ -50,7 +50,18 @@ import {
 } from './contracts/mealPlans';
 import { progressSchema, type Progress } from './contracts/progress';
 import { recipeImportSchema, type RecipeImport } from './contracts/recipeImports';
-import { recipeDetailSchema, recipeNutritionSchema, recipePageSchema, type RecipeDetail, type RecipeNutrition, type RecipePage, type RecipeWrite } from './contracts/recipes';
+import {
+  recipeDetailSchema,
+  recipeNutritionPreviewSchema,
+  recipeNutritionSchema,
+  recipePageSchema,
+  type RecipeDetail,
+  type RecipeIngredientInput,
+  type RecipeNutrition,
+  type RecipeNutritionPreview,
+  type RecipePage,
+  type RecipeWrite,
+} from './contracts/recipes';
 
 /** Upper bound on profile pages followed; a household has far fewer. */
 export const MAX_PROFILE_PAGES = 10;
@@ -163,6 +174,11 @@ export function getRecipe(api: ApiClient, profileId: string, recipeId: string, s
 /** The current version's nutrition, calculated on the server, with each ingredient's status. */
 export function getRecipeNutrition(api: ApiClient, profileId: string, recipeId: string, signal?: AbortSignal): Promise<RecipeNutrition> {
   return api.request(`${recipesPath(profileId)}/${encodeURIComponent(recipeId)}/nutrition`, { schema: recipeNutritionSchema, signal });
+}
+
+/** Layer 13B — nutrition for the form as it is now; persists nothing. */
+export function previewRecipeNutrition(api: ApiClient, profileId: string, body: { servings: number | null; ingredients: RecipeIngredientInput[] }, signal?: AbortSignal): Promise<RecipeNutritionPreview> {
+  return api.request(`${recipesPath(profileId)}/nutrition-preview`, { method: 'POST', body, schema: recipeNutritionPreviewSchema, signal });
 }
 
 /** POST — creates the recipe and its version 1; the server stores and numbers everything. */
