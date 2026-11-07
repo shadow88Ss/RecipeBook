@@ -103,7 +103,7 @@
    "description": "Cornstarch"
   },
   {
-   "ndb_number": "16124",
+   "ndb_number": "16123",
    "description": "Soy sauce made from soy and wheat (shoyu)"
   },
   {
@@ -148,7 +148,7 @@
   },
   {
    "ndb_number": "11546",
-   "description": "Tomato products, canned, paste, without salt added"
+   "description": "Tomato products, canned, paste, without salt added (Includes foods for USDA's Food Distribution Program)"
   },
   {
    "ndb_number": "11531",
@@ -196,7 +196,7 @@
   },
   {
    "ndb_number": "05096",
-   "description": "Chicken, broilers or fryers, thigh, meat only, raw"
+   "description": "Chicken, broilers or fryers, dark meat, thigh, meat only, raw"
   },
   {
    "ndb_number": "19080",

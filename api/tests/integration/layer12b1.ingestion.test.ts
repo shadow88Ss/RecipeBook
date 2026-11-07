@@ -12,6 +12,7 @@ import { createApp } from '../../src/app';
 import { logger } from '../../src/lib/logger';
 import { applyPlan, IngestionStopped } from '../../src/ingestion/usda/apply';
 import { buildPlan } from '../../src/ingestion/usda/plan';
+import { sqlEditorScript } from '../../src/ingestion/usda/sqlEditorScript';
 import { PgHarnessProfileRepository } from '../helpers/pgHarnessProfileRepository';
 import { PgHarnessScopedDbFactory } from '../helpers/pgHarnessScopedDb';
 import { rebuildTestDatabase } from '../helpers/testDb';
@@ -234,5 +235,30 @@ describe('ingested Foods through the real API (Layer 12B flow)', () => {
     const preview = await post('/v1/nutrition/calculate', { items: [{ food_id: id, quantity: 100, unit: 'g' }] });
     expect(preview.body.summary.fiber_g).toMatchObject({ value: null, coverage: 'unavailable' });
     expect(preview.body.summary.energy_kcal.value).toBe(80);
+  });
+});
+
+describe('Layer 13B: SQL-editor script (same policy as the CLI)', () => {
+  it('dry run reports and writes nothing; apply writes exactly what the CLI writes; a re-run adds nothing', async () => {
+    const fresh = await rebuildTestDatabase('recipebook_api_test_layer12b1_sql');
+    try {
+      const extended = file();
+      (extended.SRLegacyFoods[0]!.foodNutrients as unknown[]).push({ nutrient: { id: 2000, number: '269', name: 'Sugars, total including NLEA', unitName: 'g' }, amount: 4.5 });
+      const sql = sqlEditorScript(buildPlan(extended, manifest()), 'TEST-FIXTURE');
+      const apply = sql.replace('v_apply boolean := false;', 'v_apply boolean := true;');
+      const count = async () => (await fresh.query('select (select count(*)::int from food) f, (select count(*)::int from food_nutrient) n')).rows[0];
+      await expect(fresh.query(sql)).rejects.toThrow(/^DRY RUN, nothing written\. Would insert 2 new foods/);
+      expect(await count()).toEqual({ f: 0, n: 0 });
+      await fresh.query(apply);
+      expect(await count()).toEqual({ f: 2, n: 9 });
+      // Supplement-only script on the loaded foods: nothing left to add.
+      await expect(fresh.query(sqlEditorScript(buildPlan(extended, manifest()), 'TEST-FIXTURE', { supplementOnly: true }))).rejects.toThrow(/Would insert 0 new foods \(0 servings, 0 nutrient values/);
+      // A changed record stops it.
+      const changed = file();
+      (changed.SRLegacyFoods[0]!.foodNutrients as { amount: number }[])[0]!.amount = 999;
+      await expect(fresh.query(sqlEditorScript(buildPlan(changed, manifest()), 'TEST-FIXTURE'))).rejects.toThrow(/^STOPPED, nothing written: CHANGED fdc 990000001/);
+    } finally {
+      await fresh.end();
+    }
   });
 });
