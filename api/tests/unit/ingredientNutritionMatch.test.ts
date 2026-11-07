@@ -47,6 +47,8 @@ const NAMES = [
   'Sugars, granulated',
   'Sugars, brown',
   'Spices, oregano, dried',
+  'Spices, ginger, ground',
+  'Ginger root, raw',
 ];
 const CANDIDATES = NAMES.map((name, i) => ({ food_id: `food-${i}`, name, matched_alias_source: 'trusted_database' }));
 
@@ -81,6 +83,8 @@ describe('food matching by food words, state and qualifiers', () => {
     ['2 potatoes', 'Potatoes, flesh and skin, raw', true],
     ['1 sweet potato', "Sweet potato, raw, unprepared (Includes foods for USDA's Food Distribution Program)", true],
     ['1 tsp dried oregano', 'Spices, oregano, dried', true],
+    ['1 tbsp grated fresh ginger', 'Ginger root, raw', true],
+    ['1 tsp ground ginger', 'Spices, ginger, ground', true],
   ])('%s -> %s', (line, name, auto) => {
     const decision = match(line);
     expect(decision?.best.name).toBe(name);

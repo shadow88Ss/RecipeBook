@@ -89,7 +89,7 @@ const GENERIC = new Set([
   'in', 'enriched', 'granulated', 'table', 'smooth', 'style', 'common', 'most', 'kernel', 'kernels', 'mature', 'seed', 'seeds', 'edible', 'meat',
   'only', 'skinless', 'boneless', 'broiler', 'broilers', 'fryer', 'fryers', 'long-grain', 'long', 'grain', 'ripe', 'salad', 'cooking', 'red', 'yellow',
   'plain', 'unsweetened', 'fluid', 'milkfat', 'nigari', 'sulfate', 'chloride', 'calcium', 'magnesium', 'unprepared', 'deglet', 'noor', 'european',
-  'such', 'as', 'thompson', 'seedless', 'cultured', 'drinking', 'tap', 'bleached', 'all-purpose', 'leaves', 'leaf', 'flesh',
+  'root', 'such', 'as', 'thompson', 'seedless', 'cultured', 'drinking', 'tap', 'bleached', 'all-purpose', 'leaves', 'leaf', 'flesh',
   'separable', 'lean', 'retail', 'parts', 'stock', 'shoyu', 'made', 'from', 'tops', 'bulb', 'nlea', 'dry', 'heat', 'moist',
   'packed', 'vitamin', 'fortified', 'unfortified', 'includes', 'quick',
 ]);
@@ -202,7 +202,7 @@ export function nameShape(name: string): NameShape {
   const restText = segments.slice(1).join(' ').replace(/\([^)]*\)/g, ' ');
   const rest = words(restText).map(singular);
   const raw = words(name.toLowerCase().replace(/[()]/g, ' '));
-  return { head, headAlternates: alternates, rest, all: new Set([...raw.map(singular), ...raw]), state: stateOf(raw) };
+  return { head, headAlternates: alternates, rest, all: new Set([...raw.map(singular), ...raw]), state: stateOf(raw) ?? (raw[0] === 'spices' ? 'dried' : null) };
 }
 
 /** Score in [0, 1] for one candidate against the line's food words and state. */
@@ -232,7 +232,11 @@ export function scoreCandidate(tokens: readonly string[], wantedState: PrepState
   } else if (state === 'cooked' || state === 'canned' || state === 'frozen') {
     score -= 0.2;
   } else if (state === 'dried') {
-    score -= 0.05;
+    // "ground cumin" names a dried spice without saying "dried".
+    if (!lineWords.has('ground')) score -= 0.05;
+  } else if (lineWords.has('ground') && !shape.all.has('ground')) {
+    // "ground ginger" is the spice, not the fresh root.
+    score -= 0.15;
   }
   if (candidate.matched_alias_source === 'ai_matched') score -= 0.2;
   return { ...candidate, score: Math.max(0, Math.round(score * 100) / 100), state, coverage };
