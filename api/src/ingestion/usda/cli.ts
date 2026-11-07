@@ -70,7 +70,7 @@ export function summarize(plan: Plan, result: ApplyResult | null): string {
     `planned: ${plan.foods.length} foods, ${servings} servings, ${nutrients} nutrient values`,
   ];
   if (result) {
-    lines.push(`inserted: ${result.inserted.length}  unchanged: ${result.unchanged.length}  changed: ${result.changed.length}  conflicts: ${result.conflicts.length}`);
+    lines.push(`inserted: ${result.inserted.length}  unchanged: ${result.unchanged.length}  supplemented: ${result.supplemented.length}  changed: ${result.changed.length}  conflicts: ${result.conflicts.length}`);
     lines.push(`written rows: foods ${result.counts.foods}, aliases ${result.counts.aliases}, servings ${result.counts.servings}, nutrients ${result.counts.nutrients}`);
     lines.push(result.committed ? 'COMMITTED' : 'DRY RUN: rolled back, nothing written');
     for (const c of result.changed) lines.push(`  changed: ${c}`);

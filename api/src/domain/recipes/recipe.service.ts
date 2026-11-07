@@ -50,7 +50,7 @@ import {
 } from './recipe.dto';
 import { calculateRecipeNutrition } from './recipe.nutrition';
 import { recipeFromOrigin } from './recipeOrigin';
-import { normalizeSearchText, type RecipeCreateInput, type RecipeIngredientInput, type RecipeListQuery, type RecipePatchInput } from './recipe.schemas';
+import { normalizeSearchText, type RecipeCreateInput, type RecipeIngredientInput, type RecipeListQuery, type RecipeNutritionPreviewInput, type RecipePatchInput } from './recipe.schemas';
 
 export const RECIPE_READ_SCOPES = ['full_management', 'view_only', 'pediatric_weight_management'] as const;
 export const RECIPE_WRITE_SCOPES = ['full_management'] as const;
@@ -250,6 +250,19 @@ export class RecipeService {
       is_current: content.version.id === recipe.current_version_id,
       ...toRecipeNutritionDto(await recipeVersionNutrition(db, content), { includeIngredients: true }),
     };
+  }
+
+  /** Layer 13B — nutrition for unsaved ingredients, through the same path as
+   * a saved version (resolveIngredientInputs -> calculateRecipeNutrition), so
+   * the preview and the saved recipe cannot disagree. Nothing is written.
+   * `ingredient_id` is the line's 0-based position as a string. */
+  async nutritionPreview(auth: AuthContext, profileId: string, input: RecipeNutritionPreviewInput) {
+    const db = this.dbFactory.forUser(auth);
+    await requireProfileScope(db, profileId, RECIPE_READ_SCOPES);
+    const content = await this.resolveIngredientInputs(db, input.ingredients);
+    const ingredients = content.map((c, index) => ({ ...c, id: String(index), sort_order: index + 1 }));
+    const { foods, vocabulary } = await loadNutritionReference(db, ingredients.flatMap((i) => (i.food_id ? [i.food_id] : [])));
+    return toRecipeNutritionDto(calculateRecipeNutrition(ingredients, foods, vocabulary, input.servings ?? null), { includeIngredients: true });
   }
 
   private async detail(db: ScopedDbClient, profileId: string, recipeId: string) {

@@ -33,9 +33,17 @@ export interface UsdaNutrientMapping {
   usdaName: string;
   key: string;
   unit: CanonicalUnit;
+  /** Layer 13B — added after foods were first ingested. Supplemental values
+   * are left out of a record's content hash (so records ingested before them
+   * stay "unchanged") and are added to those records without changing any
+   * existing row (apply.ts). */
+  supplemental?: true;
 }
 
+/** Version of the core map: part of every record's content hash. */
 export const USDA_NUTRIENT_MAP_VERSION = 'usda-fdc-sr-legacy-map-1';
+/** Version including supplemental nutrients (Layer 13B). */
+export const USDA_SUPPLEMENT_MAP_VERSION = 'usda-fdc-sr-legacy-map-2';
 
 export const USDA_NUTRIENT_MAP: readonly UsdaNutrientMapping[] = [
   { fdcNutrientId: 1008, srNumber: '208', usdaName: 'Energy', key: 'energy', unit: 'kcal' },
@@ -59,7 +67,15 @@ export const USDA_NUTRIENT_MAP: readonly UsdaNutrientMapping[] = [
   { fdcNutrientId: 1175, srNumber: '415', usdaName: 'Vitamin B-6', key: 'vitamin_b6', unit: 'mg' },
   { fdcNutrientId: 1190, srNumber: '435', usdaName: 'Folate, DFE', key: 'folate', unit: 'mcg' },
   { fdcNutrientId: 1178, srNumber: '418', usdaName: 'Vitamin B-12', key: 'vitamin_b12', unit: 'mcg' },
+  // Layer 13B (supplemental). Both match their vocabulary definitions:
+  //   total_sugars   USDA "Sugars, total including NLEA" = total mono- and
+  //                  disaccharides, the US label's "Total Sugars".
+  //   saturated_fat  USDA "Fatty acids, total saturated".
+  { fdcNutrientId: 2000, srNumber: '269', usdaName: 'Sugars, total including NLEA', key: 'total_sugars', unit: 'g', supplemental: true },
+  { fdcNutrientId: 1258, srNumber: '606', usdaName: 'Fatty acids, total saturated', key: 'saturated_fat', unit: 'g', supplemental: true },
 ];
+
+export const SUPPLEMENTAL_KEYS: ReadonlySet<string> = new Set(USDA_NUTRIENT_MAP.filter((m) => m.supplemental).map((m) => m.key));
 
 /** USDA writes micrograms as "µg" (or "UG"); everything else is compared case-insensitively. */
 export function normalizeUsdaUnit(unitName: string): string {

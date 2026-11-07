@@ -75,6 +75,18 @@ describe('plan', () => {
     expect(buildPlan(changed, manifest()).foods[0]!.contentSha256).not.toBe(a);
   });
 
+  it('Layer 13B: supplemental nutrients are planned but leave the content hash unchanged', () => {
+    const base = buildPlan(file(), manifest()).foods[0]!;
+    const extended = file();
+    (extended.SRLegacyFoods[0]!.foodNutrients as unknown[]).push(
+      { nutrient: { id: 2000, number: '269', name: 'Sugars, total including NLEA', unitName: 'g' }, amount: 4.5 },
+      { nutrient: { id: 1258, number: '606', name: 'Fatty acids, total saturated', unitName: 'g' }, amount: 1.25 },
+    );
+    const planned = buildPlan(extended, manifest()).foods[0]!;
+    expect(planned.contentSha256).toBe(base.contentSha256);
+    expect(planned.nutrients).toEqual(expect.arrayContaining([{ key: 'total_sugars', unit: 'g', amount: 4.5 }, { key: 'saturated_fat', unit: 'g', amount: 1.25 }]));
+  });
+
   it('refuses a description mismatch, a missing record, a duplicate and a wrong file', () => {
     const wrong = manifest();
     wrong.foods[0]!.description = 'Testfood, alpha, cooked';
@@ -109,6 +121,18 @@ describe('committed DEV bootstrap manifest', () => {
     expect(new Set(m.foods.map((f) => f.ndb_number)).size).toBe(m.foods.length);
     // SR brand names are written in capitals (e.g. "KRAFT"); none may be selected
     for (const f of m.foods) expect(f.description.replace(/\bUSDA's\b/g, ''), f.description).not.toMatch(/\b[A-Z]{3,}\b/);
+  });
+});
+
+describe('committed recipe-staples manifest (Layer 13B)', () => {
+  it('is valid, generic, and adds only foods the bootstrap does not already list', () => {
+    const staples = manifestSchema.parse(JSON.parse(readFileSync(path.join(path.dirname(DEFAULT_MANIFEST), 'recipe-staples-2026-11.manifest.json'), 'utf8')));
+    const bootstrap = manifestSchema.parse(JSON.parse(readFileSync(DEFAULT_MANIFEST, 'utf8')));
+    expect(new Set(staples.foods.map((f) => f.ndb_number)).size).toBe(staples.foods.length);
+    const known = new Set(bootstrap.foods.map((f) => f.ndb_number));
+    expect(staples.foods.filter((f) => known.has(f.ndb_number))).toEqual([]);
+    for (const f of staples.foods) expect(f.description.replace(/\bUSDA's\b/g, ''), f.description).not.toMatch(/\b[A-Z]{3,}\b/);
+    expect(staples.foods.map((f) => f.description)).toEqual(expect.arrayContaining(['Salt, table', 'Wheat flour, white, all-purpose, enriched, bleached', 'Beverages, water, tap, drinking']));
   });
 });
 

@@ -124,6 +124,32 @@ describe('trusted USDA ingestion (operator path)', () => {
     expect(await counts()).toEqual(before);
   });
 
+  it('Layer 13B: supplemental nutrients (sugars, saturated fat) are added to unchanged records without touching any existing row', async () => {
+    const withSupplement = file();
+    (withSupplement.SRLegacyFoods[0]!.foodNutrients as unknown[]).push(
+      { nutrient: { id: 2000, number: '269', name: 'Sugars, total including NLEA', unitName: 'g' }, amount: 4.5 },
+      { nutrient: { id: 1258, number: '606', name: 'Fatty acids, total saturated', unitName: 'g' }, amount: 1.25 },
+    );
+    const existing = (await pool.query('select id, amount_per_canonical_unit::float as amount from food_nutrient order by id')).rows;
+    const result = await ingest(withSupplement);
+    expect(result).toMatchObject({ committed: true, inserted: [], changed: [], counts: { foods: 0, aliases: 0, servings: 0, nutrients: 2 } });
+    expect(result.unchanged).toHaveLength(2);
+    expect(result.supplemented).toEqual(['fdc 990000001 (NDB 99001) Testfood, alpha, raw']);
+    const added = await pool.query(
+      "select n.canonical_key, fn.amount_per_canonical_unit::float as amount, fn.basis_quantity::float as basis, fn.basis_unit, fn.source from food_nutrient fn join nutrient n on n.id = fn.nutrient_id join food f on f.id = fn.food_id where f.canonical_name = 'usda-fdc:990000001' and n.canonical_key in ('total_sugars', 'saturated_fat') order by 1",
+    );
+    expect(added.rows).toEqual([
+      { canonical_key: 'saturated_fat', amount: 1.25, basis: 100, basis_unit: 'g', source: 'trusted_database' },
+      { canonical_key: 'total_sugars', amount: 4.5, basis: 100, basis_unit: 'g', source: 'trusted_database' },
+    ]);
+    // Every earlier row is exactly as it was.
+    const after = (await pool.query('select id, amount_per_canonical_unit::float as amount from food_nutrient where id = any($1::uuid[]) order by id', [existing.map((r) => r.id)])).rows;
+    expect(after).toEqual(existing);
+    // Running it again adds nothing.
+    const again = await ingest(withSupplement);
+    expect(again).toMatchObject({ counts: { nutrients: 0 }, supplemented: [] });
+  });
+
   it('a changed source record stops the whole run for review; nothing is overwritten or added', async () => {
     const changed = file();
     (changed.SRLegacyFoods[0]!.foodNutrients as { amount: number }[])[0]!.amount = 999;

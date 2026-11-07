@@ -307,9 +307,10 @@ describe('nutrition of imported recipes (Layer 13A.1)', () => {
     expect(res.status).toBe(201);
     nutritionImportId = res.body.id;
     const [rice, spinach, egg] = res.body.draft.ingredients;
-    // "cooked rice" has no direct match; its head word "rice" finds "Rice, cooked" (weaker).
-    expect(rice).toMatchObject({ text: '200 g cooked rice', quantity: 200, unit: 'g', suggestion: { food_id: F.rice, name: 'Rice, cooked', match_kind: 'prefix', term: 'rice', confidence: 0.45 } });
-    expect(spinach).toMatchObject({ note: 'ambiguous_unit', suggestion: { food_id: F.spinach, name: 'Spinach', match_kind: 'exact', term: 'spinach', confidence: 0.8 } });
+    // Layer 13B: "cooked rice" is ranked by food word and state, so "Rice, cooked" is an exact fit.
+    expect(rice).toMatchObject({ text: '200 g cooked rice', quantity: 200, unit: 'g', suggestion: { food_id: F.rice, name: 'Rice, cooked', match_kind: 'exact', term: 'rice', confidence: 1, state: { line: 'cooked', food: 'cooked' } } });
+    // "fresh" asks for raw; the fixture names no state (a small deduction). It has no servings, so no amount.
+    expect(spinach).toMatchObject({ note: 'ambiguous_unit', suggestion: { food_id: F.spinach, name: 'Spinach', match_kind: 'prefix', term: 'spinach', confidence: 0.95, auto: true, amount: null } });
     expect(egg.suggestion).toBeUndefined();
   });
 

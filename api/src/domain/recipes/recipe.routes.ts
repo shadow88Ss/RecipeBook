@@ -12,12 +12,14 @@ import {
   recipeCreateSchema,
   recipeIdParamSchema,
   recipeListQuerySchema,
+  recipeNutritionPreviewSchema,
   recipePatchSchema,
   recipeVariantListQuerySchema,
   recipeVariantParamSchema,
   recipeVersionParamSchema,
   type RecipeCreateInput,
   type RecipeListQuery,
+  type RecipeNutritionPreviewInput,
   type RecipePatchInput,
   type RecipeVariantListQuery,
 } from './recipe.schemas';
@@ -49,6 +51,11 @@ export function createRecipeRouter(service: RecipeService): Router {
     '/',
     validate({ params: profileIdParamSchema, body: recipeCreateSchema }),
     handle(201, (auth, p, req) => service.create(auth, p.profile_id, req.body as RecipeCreateInput)),
+  );
+  router.post(
+    '/nutrition-preview',
+    validate({ params: profileIdParamSchema, body: recipeNutritionPreviewSchema }),
+    handle(200, (auth, p, req) => service.nutritionPreview(auth, p.profile_id, req.body as RecipeNutritionPreviewInput)),
   );
   router.get(
     '/:recipe_id',

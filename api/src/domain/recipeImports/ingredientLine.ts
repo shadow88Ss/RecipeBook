@@ -79,3 +79,16 @@ export function parseIngredientAmount(line: string): ParsedIngredientAmount {
   }
   return { quantity: tidy(quantity) };
 }
+
+/** Layer 13B — the leading number and the words after it, for nutrition
+ * amount resolution (ingredientAmount.ts). Same number grammar as
+ * parseIngredientAmount; does not change what an import stores. Ranges and
+ * unreadable numbers give null. */
+export function readLeadingAmount(line: string): { quantity: number; rest: string } | null {
+  const normalized = line.normalize('NFKC').trim().replace(/⁄/g, '/');
+  const match = LEADING_AMOUNT.exec(normalized);
+  if (!match?.[1] || match[2]) return null;
+  const quantity = parseNumber(match[1]);
+  if (quantity === null || !(quantity > 0) || quantity > MAX_CONVERSION_QUANTITY) return null;
+  return { quantity, rest: (match[3] ?? '').trim() };
+}

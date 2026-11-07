@@ -110,6 +110,16 @@ export const recipePatchSchema = z
   );
 export type RecipePatchInput = z.infer<typeof recipePatchSchema>;
 
+/** Layer 13B — POST .../recipes/nutrition-preview: the nutrition a recipe
+ * WOULD have with these ingredients and servings, calculated exactly as for
+ * a saved version and persisting nothing. The recipe form calls it on every
+ * change (ingredient, amount, Food/preparation state, servings). */
+export const recipeNutritionPreviewSchema = z.object({
+  servings: servingsSchema.nullable().optional(),
+  ingredients: ingredientsSchema,
+});
+export type RecipeNutritionPreviewInput = z.infer<typeof recipeNutritionPreviewSchema>;
+
 export const recipeIdParamSchema = profileIdParamSchema.extend({
   recipe_id: z.uuid({ message: 'recipe_id must be a valid UUID.' }),
 });

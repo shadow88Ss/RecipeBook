@@ -1,0 +1,226 @@
+{
+ "manifest_version": 1,
+ "name": "recipe-staples-2026-11",
+ "source": {
+  "system": "usda_fdc",
+  "dataset": "sr_legacy"
+ },
+ "foods": [
+  {
+   "ndb_number": "02047",
+   "description": "Salt, table"
+  },
+  {
+   "ndb_number": "20081",
+   "description": "Wheat flour, white, all-purpose, enriched, bleached"
+  },
+  {
+   "ndb_number": "02030",
+   "description": "Spices, pepper, black"
+  },
+  {
+   "ndb_number": "02010",
+   "description": "Spices, cinnamon, ground"
+  },
+  {
+   "ndb_number": "02014",
+   "description": "Spices, cumin seed"
+  },
+  {
+   "ndb_number": "02028",
+   "description": "Spices, paprika"
+  },
+  {
+   "ndb_number": "02020",
+   "description": "Spices, garlic powder"
+  },
+  {
+   "ndb_number": "02026",
+   "description": "Spices, onion powder"
+  },
+  {
+   "ndb_number": "02027",
+   "description": "Spices, oregano, dried"
+  },
+  {
+   "ndb_number": "02043",
+   "description": "Spices, turmeric, ground"
+  },
+  {
+   "ndb_number": "02009",
+   "description": "Spices, chili powder"
+  },
+  {
+   "ndb_number": "02025",
+   "description": "Spices, nutmeg, ground"
+  },
+  {
+   "ndb_number": "02021",
+   "description": "Spices, ginger, ground"
+  },
+  {
+   "ndb_number": "02013",
+   "description": "Spices, coriander seed"
+  },
+  {
+   "ndb_number": "02003",
+   "description": "Spices, basil, dried"
+  },
+  {
+   "ndb_number": "02050",
+   "description": "Vanilla extract"
+  },
+  {
+   "ndb_number": "18369",
+   "description": "Leavening agents, baking powder, double-acting, sodium aluminum sulfate"
+  },
+  {
+   "ndb_number": "18372",
+   "description": "Leavening agents, baking soda"
+  },
+  {
+   "ndb_number": "18375",
+   "description": "Leavening agents, yeast, baker's, active dry"
+  },
+  {
+   "ndb_number": "19334",
+   "description": "Sugars, brown"
+  },
+  {
+   "ndb_number": "19336",
+   "description": "Sugars, powdered"
+  },
+  {
+   "ndb_number": "19165",
+   "description": "Cocoa, dry powder, unsweetened"
+  },
+  {
+   "ndb_number": "19353",
+   "description": "Syrups, maple"
+  },
+  {
+   "ndb_number": "20027",
+   "description": "Cornstarch"
+  },
+  {
+   "ndb_number": "16124",
+   "description": "Soy sauce made from soy and wheat (shoyu)"
+  },
+  {
+   "ndb_number": "09152",
+   "description": "Lemon juice, raw"
+  },
+  {
+   "ndb_number": "09160",
+   "description": "Lime juice, raw"
+  },
+  {
+   "ndb_number": "09156",
+   "description": "Lemon peel, raw"
+  },
+  {
+   "ndb_number": "11297",
+   "description": "Parsley, fresh"
+  },
+  {
+   "ndb_number": "11165",
+   "description": "Coriander (cilantro) leaves, raw"
+  },
+  {
+   "ndb_number": "11216",
+   "description": "Ginger root, raw"
+  },
+  {
+   "ndb_number": "11291",
+   "description": "Onions, spring or scallions (includes tops and bulb), raw"
+  },
+  {
+   "ndb_number": "11677",
+   "description": "Shallots, raw"
+  },
+  {
+   "ndb_number": "11979",
+   "description": "Peppers, jalapeno, raw"
+  },
+  {
+   "ndb_number": "11819",
+   "description": "Peppers, hot chili, red, raw"
+  },
+  {
+   "ndb_number": "11546",
+   "description": "Tomato products, canned, paste, without salt added"
+  },
+  {
+   "ndb_number": "11531",
+   "description": "Tomatoes, red, ripe, canned, packed in tomato juice"
+  },
+  {
+   "ndb_number": "14411",
+   "description": "Beverages, water, tap, drinking"
+  },
+  {
+   "ndb_number": "01056",
+   "description": "Cream, sour, cultured"
+  },
+  {
+   "ndb_number": "01049",
+   "description": "Cream, fluid, half and half"
+  },
+  {
+   "ndb_number": "02048",
+   "description": "Vinegar, cider"
+  },
+  {
+   "ndb_number": "02069",
+   "description": "Vinegar, balsamic"
+  },
+  {
+   "ndb_number": "02046",
+   "description": "Mustard, prepared, yellow"
+  },
+  {
+   "ndb_number": "04025",
+   "description": "Salad dressing, mayonnaise, regular"
+  },
+  {
+   "ndb_number": "04058",
+   "description": "Oil, sesame, salad or cooking"
+  },
+  {
+   "ndb_number": "04047",
+   "description": "Oil, coconut"
+  },
+  {
+   "ndb_number": "12118",
+   "description": "Nuts, coconut milk, canned (liquid expressed from grated meat and water)"
+  },
+  {
+   "ndb_number": "05096",
+   "description": "Chicken, broilers or fryers, thigh, meat only, raw"
+  },
+  {
+   "ndb_number": "19080",
+   "description": "Candies, semisweet chocolate"
+  },
+  {
+   "ndb_number": "18079",
+   "description": "Bread, crumbs, dry, grated, plain"
+  },
+  {
+   "ndb_number": "02044",
+   "description": "Basil, fresh"
+  },
+  {
+   "ndb_number": "02049",
+   "description": "Thyme, fresh"
+  },
+  {
+   "ndb_number": "02063",
+   "description": "Rosemary, fresh"
+  },
+  {
+   "ndb_number": "02064",
+   "description": "Peppermint, fresh"
+  }
+ ]
+}

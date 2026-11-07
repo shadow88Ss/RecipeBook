@@ -17,7 +17,7 @@
 
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { normalizeUsdaUnit, USDA_NUTRIENT_MAP, USDA_NUTRIENT_MAP_VERSION } from './nutrientMap';
+import { normalizeUsdaUnit, SUPPLEMENTAL_KEYS, USDA_NUTRIENT_MAP, USDA_NUTRIENT_MAP_VERSION } from './nutrientMap';
 
 export const SR_BASIS = { quantity: 100, unit: 'g' as const };
 export const USDA_LICENCE = 'CC0-1.0';
@@ -127,7 +127,8 @@ function hashContent(food: Omit<PlannedFood, 'contentSha256' | 'unmappedNumbers'
     description: food.description,
     category: food.category,
     basis: SR_BASIS,
-    nutrients: [...food.nutrients].sort((a, b) => (a.key < b.key ? -1 : 1)),
+    // Supplemental nutrients are not part of the hash (nutrientMap.ts).
+    nutrients: food.nutrients.filter((n) => !SUPPLEMENTAL_KEYS.has(n.key)).sort((a, b) => (a.key < b.key ? -1 : 1)),
     servings: [...food.servings].sort((a, b) => (a.description < b.description ? -1 : 1)),
     mapVersion: USDA_NUTRIENT_MAP_VERSION,
   });

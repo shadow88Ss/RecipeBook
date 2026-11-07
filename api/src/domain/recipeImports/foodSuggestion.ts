@@ -1,32 +1,58 @@
 // Layer 13A.1 — suggesting a Food for each imported ingredient line.
+// Layer 13B — the suggestion is now chosen by what the line says (food
+// words, preparation state, qualifiers: foodMatch.ts) from a pool of
+// search_foods() candidates, and carries a calculable amount built from the
+// chosen Food's own servings (ingredientAmount.ts).
 //
 // A suggestion is only a proposal. It is stored as `needs_confirmation`
 // (never `matched`), so the nutrition engine does not count it
 // (recipe.nutrition.ts: food_needs_confirmation) until the user confirms or
 // replaces it (Master §18: low-confidence matches never count toward
-// totals). Nothing here estimates a nutrient value.
+// totals). `auto` marks a clear match the review form may pre-link; saving
+// the reviewed form is the user's confirmation, and the form shows that it
+// was matched automatically. Nothing here estimates a nutrient value.
 //
 // The search term is the ingredient line without its amount, unit,
 // parenthetical notes, preparation words and anything after the first comma
-// ("2 cups finely chopped fresh spinach, washed" -> "spinach"). The term goes
-// through the same search_foods() the Food search uses, as the caller.
+// ("2 cups finely chopped fresh spinach, washed" -> "spinach"). Every search
+// goes through the same search_foods() the Food search uses, as the caller.
 
 import type { ScopedDbClient } from '../../lib/scopedDb';
 import { localeFallbackChain } from '../foods/locale';
 import { normalizeSearchText } from '../recipes/recipe.schemas';
+import { rankCandidates, termTokens, type MatchReason, type PrepState, type RankedCandidate } from './foodMatch';
+import { proposeAmount, type ProposedAmount, type ServingOption } from './ingredientAmount';
 
 /** Recorded with the extraction so a suggestion can be traced to how it was made. */
-export const FOOD_SUGGESTION_METHOD = 'search_foods_term_v1';
+export const FOOD_SUGGESTION_METHOD = 'ranked_food_match_v2';
+
+export interface SuggestedAlternative {
+  food_id: string;
+  name: string;
+  state: PrepState | null;
+  confidence: number;
+  amount: ProposedAmount | null;
+}
 
 export interface FoodSuggestion {
   food_id: string;
   /** The Food's display name for the user, falling back to its canonical name. */
   name: string;
   match_kind: 'exact' | 'prefix' | 'contains';
-  /** How closely the search term matched; never a claim the food is right. */
+  /** How well the Food fits the line (0-1); never a claim the food is right. */
   confidence: number;
   /** The term that was searched, so the user can see why. */
   term: string;
+  /** Layer 13B — clear enough to pre-link for review (no blocking reason). */
+  auto: boolean;
+  /** Why the match is not certain (see foodMatch.ts MatchReason). */
+  reasons: MatchReason[];
+  /** The state the line asks for, and the chosen Food's state. */
+  state: { line: PrepState | null; food: PrepState | null };
+  /** A calculable amount from this Food's servings; null when none fits. */
+  amount: ProposedAmount | null;
+  /** Other close Foods (other states or kinds), best first. */
+  alternatives: SuggestedAlternative[];
 }
 
 const MEASURE_WORDS = new Set([
@@ -70,37 +96,54 @@ interface SearchRow {
   matched_alias_source: string | null;
 }
 
-const KINDS = ['exact', 'prefix', 'contains'] as const;
-const KIND_CONFIDENCE = { exact: 0.8, prefix: 0.6, contains: 0.45 } as const;
-/** Searching only the last word ("chicken thighs" -> "thighs") is a weaker signal. */
-const HEAD_WORD_FACTOR = 0.75;
-/** An alias that was itself only AI-matched needs its own confirmation. */
-const AI_ALIAS_FACTOR = 0.7;
+interface ServingRow extends ServingOption {
+  food_id: string;
+}
+
+const SEARCH_LIMIT = 25;
+const MAX_SEARCHES = 5;
 
 export async function suggestFood(db: ScopedDbClient, line: string, locale = 'en'): Promise<FoodSuggestion | null> {
   const term = foodSearchTerm(line);
   if (term.length < 2) return null;
-  const attempts: Array<{ query: string; factor: number }> = [{ query: term, factor: 1 }];
-  const words = term.split(' ');
-  if (words.length > 1) {
-    const singular = (w: string) => (w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w);
-    attempts.push({ query: words.map(singular).join(' '), factor: 1 });
-    attempts.push({ query: singular(words[words.length - 1] ?? ''), factor: HEAD_WORD_FACTOR });
-  } else if (term.length > 3 && term.endsWith('s') && !term.endsWith('ss')) {
-    attempts.push({ query: term.slice(0, -1), factor: 1 });
+  const tokens = termTokens(term);
+  const queries = [...new Set([term, tokens.join(' '), ...[...tokens].sort((a, b) => b.length - a.length)])].filter((q) => q.length >= 3 || q === term).slice(0, MAX_SEARCHES);
+
+  const pool: SearchRow[] = [];
+  for (const query of queries) {
+    pool.push(...(await db.rpcRows<SearchRow>('search_foods', { p_query: query, p_locales: localeFallbackChain(locale), p_limit: SEARCH_LIMIT })));
   }
-  const tried = new Set<string>();
-  for (const attempt of attempts) {
-    if (attempt.query.length < 2 || tried.has(attempt.query)) continue;
-    tried.add(attempt.query);
-    const rows = await db.rpcRows<SearchRow>('search_foods', { p_query: attempt.query, p_locales: localeFallbackChain(locale), p_limit: 5 });
-    const best = rows[0];
-    if (!best) continue;
-    const kind = KINDS[best.match_rank] ?? 'contains';
-    const confidence = KIND_CONFIDENCE[kind] * attempt.factor * (best.matched_alias_source === 'ai_matched' ? AI_ALIAS_FACTOR : 1);
-    return { food_id: best.food_id, name: best.display_name ?? best.canonical_name, match_kind: kind, confidence: Math.round(confidence * 100) / 100, term: attempt.query };
-  }
-  return null;
+  const decision = rankCandidates(
+    line,
+    term,
+    pool.map((row) => ({ food_id: row.food_id, name: row.display_name ?? row.canonical_name, matched_alias_source: row.matched_alias_source })),
+  );
+  if (!decision) return null;
+
+  const chosen: RankedCandidate[] = [decision.best, ...decision.alternatives];
+  const servings = await db.select<ServingRow>('food_serving', {
+    columns: 'id, food_id, serving_description, canonical_quantity, canonical_unit',
+    in: { food_id: chosen.map((c) => c.food_id) },
+  });
+  const amountFor = (candidate: RankedCandidate) =>
+    proposeAmount(
+      line,
+      servings.filter((s) => s.food_id === candidate.food_id).map((s) => ({ ...s, canonical_quantity: Number(s.canonical_quantity) })),
+      candidate.name,
+    );
+
+  return {
+    food_id: decision.best.food_id,
+    name: decision.best.name,
+    match_kind: decision.match_kind,
+    confidence: decision.confidence,
+    term: tokens.join(' ') || term,
+    auto: decision.auto,
+    reasons: decision.reasons,
+    state: { line: decision.line_state, food: decision.best.state },
+    amount: amountFor(decision.best),
+    alternatives: decision.alternatives.map((a) => ({ food_id: a.food_id, name: a.name, state: a.state, confidence: a.score, amount: amountFor(a) })),
+  };
 }
 
 /** Suggestions for every line, a few searches at a time. A failed search
